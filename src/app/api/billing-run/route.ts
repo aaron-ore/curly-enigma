@@ -10,7 +10,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "month parameter required (YYYY-MM-DD)" }, { status: 400 });
     }
 
-    // Get all active clients (exclude children from primary list, nest them)
+    // Calculate previous month for comparison
+    const monthDate = new Date(billingMonth);
+    const prevMonthDate = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
+    const prevMonth = prevMonthDate.toISOString().split("T")[0];
+
+    // Get all active clients
     const clientsRes = await query(
       `SELECT c.id, c.name, c.status, c.billing_type, c.payment_method,
               c.parent_client_id, parent.name as parent_name
@@ -33,6 +38,12 @@ export async function GET(request: NextRequest) {
       [billingMonth]
     );
 
+    // Get previous month usage for comparison
+    const prevUsageRes = await query(
+      `SELECT client_id, active_units FROM usage_records WHERE billing_month = $1`,
+      [prevMonth]
+    );
+
     // Get imported active_units from latest import for this month
     const importedUnitsRes = await query(
       `SELECT tcm.client_id, COUNT(*) as active_count
@@ -47,7 +58,7 @@ export async function GET(request: NextRequest) {
       [billingMonth]
     );
 
-    // Build grid rows
+    // Build lookup maps
     const ratePlansByClient: Record<number, RatePlan[]> = {};
     for (const rp of ratePlansRes.rows) {
       if (!ratePlansByClient[rp.client_id]) ratePlansByClient[rp.client_id] = [];
@@ -57,6 +68,11 @@ export async function GET(request: NextRequest) {
     const usageByClient: Record<number, any> = {};
     for (const ur of usageRes.rows) {
       usageByClient[ur.client_id] = ur;
+    }
+
+    const prevUsageByClient: Record<number, number> = {};
+    for (const ur of prevUsageRes.rows) {
+      prevUsageByClient[ur.client_id] = parseInt(ur.active_units);
     }
 
     const importedByClient: Record<number, number> = {};
@@ -69,6 +85,7 @@ export async function GET(request: NextRequest) {
       const activeRatePlan = findActiveRatePlan(clientRatePlans, billingMonth);
       const existingUsage = usageByClient[client.id];
       const importedUnits = importedByClient[client.id];
+      const prevMonthUnits = prevUsageByClient[client.id];
 
       // Determine active_units: existing usage > imported > 0
       let activeUnits = 0;
@@ -107,9 +124,18 @@ export async function GET(request: NextRequest) {
         calculated_total: calculatedTotal,
         calc_error: calcError,
         is_consolidated: !!client.parent_client_id,
+        // Rate plan details for client-side recalculation
+        pricing_model: activeRatePlan?.pricing_model || null,
+        flat_rate: activeRatePlan?.flat_rate || null,
+        tier_1_rate: activeRatePlan?.tier_1_rate || null,
+        tier_1_unit_count: activeRatePlan?.tier_1_unit_count || null,
+        tier_2_rate: activeRatePlan?.tier_2_rate || null,
+        cap_amount: activeRatePlan?.cap_amount || null,
         per_location_cap: activeRatePlan?.cap_scope === "per_location"
-          ? `$${activeRatePlan.cap_amount}/location — verify total manually`
+          ? `$${activeRatePlan.cap_amount}/location`
           : null,
+        // Previous month comparison
+        prev_month_units: prevMonthUnits !== undefined ? prevMonthUnits : null,
       };
     });
 
