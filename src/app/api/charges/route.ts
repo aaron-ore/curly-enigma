@@ -9,6 +9,8 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get("month");
     const clientId = searchParams.get("client_id");
     const paymentMethod = searchParams.get("payment_method");
+    const dateFrom = searchParams.get("date_from");
+    const dateTo = searchParams.get("date_to");
 
     let sql = `
       SELECT ch.*, cl.name as client_name, cl.billing_type
@@ -18,13 +20,25 @@ export async function GET(request: NextRequest) {
     `;
     const params: any[] = [];
 
-    if (status) {
+    if (status && status !== "overdue") {
       params.push(status);
       sql += ` AND ch.status = $${params.length}`;
+    }
+    if (status === "overdue") {
+      // Overdue = pending for more than 60 days
+      sql += ` AND ch.status = 'pending' AND ch.billing_month < NOW() - INTERVAL '60 days'`;
     }
     if (month) {
       params.push(month);
       sql += ` AND ch.billing_month = $${params.length}`;
+    }
+    if (dateFrom) {
+      params.push(dateFrom);
+      sql += ` AND ch.billing_month >= $${params.length}`;
+    }
+    if (dateTo) {
+      params.push(dateTo);
+      sql += ` AND ch.billing_month <= $${params.length}`;
     }
     if (clientId) {
       params.push(clientId);
@@ -38,7 +52,18 @@ export async function GET(request: NextRequest) {
     sql += ` ORDER BY ch.billing_month DESC, cl.name ASC`;
 
     const result = await query(sql, params);
-    return NextResponse.json(result.rows);
+
+    // Mark overdue in response: pending charges older than 60 days
+    const now = new Date();
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const rows = result.rows.map((row: any) => {
+      if (row.status === "pending" && new Date(row.billing_month) < sixtyDaysAgo) {
+        return { ...row, display_status: "overdue" };
+      }
+      return { ...row, display_status: row.status };
+    });
+
+    return NextResponse.json(rows);
   } catch (error: any) {
     return NextResponse.json(
       { error: "Failed to fetch charges", detail: error.message },
