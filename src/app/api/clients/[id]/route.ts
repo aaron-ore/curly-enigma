@@ -31,7 +31,7 @@ export async function GET(
     // Get usage/charge history
     const historyRes = await query(
       `SELECT ur.billing_month, ur.active_units, ur.source, ur.calculated_total,
-              ch.amount_charged, ch.date_charged, ch.status, ch.payment_method_used
+              ch.id as charge_id, ch.amount_charged, ch.date_charged, ch.status, ch.payment_method_used
        FROM usage_records ur
        LEFT JOIN charges ch ON ch.client_id = ur.client_id AND ch.billing_month = ur.billing_month
        WHERE ur.client_id = $1
