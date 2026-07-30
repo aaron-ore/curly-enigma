@@ -194,7 +194,7 @@ export default function ChargesPage() {
               </thead>
               <tbody>
                 {charges.map((ch) => (
-                  <tr key={ch.id} className={ch.display_status === "overdue" ? "bg-red-50/40" : ""}>
+                  <tr key={ch.id} className={ch.display_status === "overdue" ? "bg-red-50/50 row-overdue" : ""}>
                     <td className="font-medium text-sm">{ch.client_name}</td>
                     <td className="text-sm">{formatMonth(ch.billing_month)}</td>
                     <td className="text-sm font-medium">${Number(ch.calculated_total).toFixed(2)}</td>
