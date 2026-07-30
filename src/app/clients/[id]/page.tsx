@@ -25,6 +25,7 @@ export default function ClientDetailPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [showRateForm, setShowRateForm] = useState(false);
+  const [deletingRateId, setDeletingRateId] = useState<number | null>(null);
 
   const fetchClient = () => {
     fetch(`/api/clients/${params.id}`)
@@ -119,6 +120,7 @@ export default function ClientDetailPage() {
                 <th>Rate</th>
                 <th>Cap</th>
                 <th>Notes</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -135,6 +137,34 @@ export default function ClientDetailPage() {
                   </td>
                   <td className="text-sm">{rp.cap_amount ? `$${rp.cap_amount}/${rp.cap_scope || "client"}` : "—"}</td>
                   <td className="text-sm text-slate-500">{rp.notes || "—"}</td>
+                  <td>
+                    {deletingRateId === rp.id ? (
+                      <div className="flex gap-1">
+                        <button
+                          className="text-[10px] px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium hover:bg-red-200"
+                          onClick={async () => {
+                            const res = await fetch(`/api/rate-plans?id=${rp.id}`, { method: "DELETE" });
+                            if (res.ok) { setDeletingRateId(null); fetchClient(); }
+                          }}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200"
+                          onClick={() => setDeletingRateId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100"
+                        onClick={() => setDeletingRateId(rp.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -158,6 +188,7 @@ export default function ClientDetailPage() {
                 <th>Charged</th>
                 <th>Date Charged</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -170,6 +201,49 @@ export default function ClientDetailPage() {
                   <td className="text-sm">{h.amount_charged ? `$${Number(h.amount_charged).toFixed(2)}` : "—"}</td>
                   <td className="text-sm text-slate-500">{h.date_charged || "—"}</td>
                   <td>{h.status && <span className={`badge status-${h.status}`}>{h.status}</span>}</td>
+                  <td>
+                    {h.charge_id && h.status === "pending" && (
+                      <button
+                        className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-medium"
+                        onClick={async () => {
+                          await fetch("/api/charges", {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              id: h.charge_id, status: "charged",
+                              amount_charged: h.calculated_total,
+                              date_charged: new Date().toISOString().split("T")[0],
+                            }),
+                          });
+                          fetchClient();
+                        }}
+                      >
+                        Mark Charged
+                      </button>
+                    )}
+                    {h.charge_id && h.status === "charged" && (
+                      <button
+                        className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 font-medium"
+                        onClick={async () => {
+                          await fetch("/api/charges", {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              id: h.charge_id, status: "paid",
+                              amount_received: h.amount_charged || h.calculated_total,
+                              date_received: new Date().toISOString().split("T")[0],
+                            }),
+                          });
+                          fetchClient();
+                        }}
+                      >
+                        Mark Paid
+                      </button>
+                    )}
+                    {h.charge_id && h.status === "paid" && (
+                      <span className="text-[10px] text-emerald-600 font-medium">Paid</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
