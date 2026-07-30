@@ -107,6 +107,9 @@ export async function GET(request: NextRequest) {
         calculated_total: calculatedTotal,
         calc_error: calcError,
         is_consolidated: !!client.parent_client_id,
+        per_location_cap: activeRatePlan?.cap_scope === "per_location"
+          ? `$${activeRatePlan.cap_amount}/location — verify total manually`
+          : null,
       };
     });
 
