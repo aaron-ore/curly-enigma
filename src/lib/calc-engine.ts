@@ -23,6 +23,7 @@ export interface RatePlan {
 export interface CalcInput {
   activeUnits: number;
   ratePlan: RatePlan;
+  cappedLocations?: number; // For per_location cap: how many locations hit the cap threshold
 }
 
 export interface CalcResult {
@@ -36,6 +37,7 @@ export interface CalcResult {
     flatAmount?: number;
     preCap?: number;
     capApplied?: boolean;
+    perLocationCapNote?: string;
   };
   error?: string;
 }
@@ -86,14 +88,21 @@ export function calculateTotal(input: CalcInput): CalcResult {
     if (ratePlan.cap_scope === "per_client" || ratePlan.cap_scope === null) {
       // per_client cap: simple MIN
       total = Math.min(total, ratePlan.cap_amount);
+      breakdown.capApplied = total < preCap;
+    } else if (ratePlan.cap_scope === "per_location") {
+      // per_location cap: total = capped_locations × cap_amount
+      // Operator inputs how many locations hit the cap threshold during billing run.
+      // If cappedLocations is provided, use it. Otherwise flag for input.
+      if (input.cappedLocations !== undefined && input.cappedLocations > 0) {
+        total = input.cappedLocations * ratePlan.cap_amount;
+        breakdown.capApplied = true;
+        breakdown.perLocationCapNote = `${input.cappedLocations} locations × $${ratePlan.cap_amount} = $${total.toFixed(2)}`;
+      } else {
+        // No location count provided yet — show uncapped total and flag
+        breakdown.capApplied = false;
+        breakdown.perLocationCapNote = `Enter # of capped locations ($${ratePlan.cap_amount}/location)`;
+      }
     }
-    // per_location cap requires location-level breakdown — handled at a higher level
-    // For now, if cap_scope is per_location but no location data, fall back to per_client
-    if (ratePlan.cap_scope === "per_location") {
-      // Without location-level data, apply as per_client (spec section 7 item 4 recommendation)
-      total = Math.min(total, ratePlan.cap_amount);
-    }
-    breakdown.capApplied = total < preCap;
   }
 
   // Round to 2 decimal places (half-up)
