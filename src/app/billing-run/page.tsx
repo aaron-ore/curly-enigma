@@ -313,17 +313,17 @@ export default function BillingRunPage() {
       ) : filteredClients.length === 0 ? (
         <div className="text-center p-8 text-slate-400 text-sm">No clients match your filter.</div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {filteredClients.map((row) => (
             <div
               key={row.client_id}
               className={`glass-card overflow-hidden transition-all duration-150 ${
-                expandedId === row.client_id ? "ring-2 ring-[#0066FF]/20" : "hover:shadow-md"
+                expandedId === row.client_id ? "ring-2 ring-[#0066FF]/20" : ""
               } ${!row.has_rate_plan ? "border-l-3 border-l-red-400" : ""}`}
             >
               {/* Collapsed Header */}
               <div
-                className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+                className="flex items-center gap-2 px-3 py-2 cursor-pointer select-none"
                 onClick={() => toggleExpand(row.client_id)}
               >
                 {/* Status dot */}
@@ -331,14 +331,14 @@ export default function BillingRunPage() {
 
                 {/* Name + rate */}
                 <div className="flex-1 min-w-0">
-                  <span className="font-semibold text-sm text-slate-900">{row.client_name}</span>
-                  <span className="text-xs text-slate-400 ml-2">{row.rate_summary}</span>
+                  <span className="font-semibold text-[13px] text-slate-900">{row.client_name}</span>
+                  <span className="text-[11px] text-slate-400 ml-1.5">{formatRate(row.rate_summary)}</span>
                 </div>
 
                 {/* Units with delta */}
-                <div className="text-right w-20 shrink-0">
-                  <span className="text-sm font-semibold text-slate-700">{row.active_units}</span>
-                  <span className="text-[10px] text-slate-400 ml-0.5">units</span>
+                <div className="text-right w-16 shrink-0">
+                  <span className="text-[13px] font-semibold text-slate-700">{row.active_units}</span>
+                  <span className="text-[10px] text-slate-400 ml-0.5">u</span>
                   {row.prev_month_units !== undefined && row.prev_month_units > 0 && (
                     <p className={`text-[10px] ${row.active_units >= row.prev_month_units ? "text-emerald-600" : "text-red-500"}`}>
                       {row.active_units >= row.prev_month_units ? "+" : ""}{row.active_units - row.prev_month_units} vs {row.prev_month_units}
@@ -347,16 +347,16 @@ export default function BillingRunPage() {
                 </div>
 
                 {/* Total */}
-                <div className="text-right w-24 shrink-0">
+                <div className="text-right w-20 shrink-0">
                   {row.active_units === 0 ? (
-                    <span className="text-xs text-slate-400">—</span>
+                    <span className="text-[11px] text-slate-400">—</span>
                   ) : (
-                    <span className="text-sm font-bold text-slate-900">${row.calculated_total.toFixed(2)}</span>
+                    <span className="text-[13px] font-bold text-slate-900">${row.calculated_total.toFixed(2)}</span>
                   )}
                 </div>
 
                 {/* Status badge */}
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full w-20 text-center shrink-0 ${
+                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full w-16 text-center shrink-0 ${
                   !row.has_rate_plan ? "bg-red-100 text-red-700" :
                   row.per_location_cap && !row.capped_locations ? "bg-amber-100 text-amber-700" :
                   row.active_units === 0 ? "bg-slate-100 text-slate-500" :
@@ -494,4 +494,9 @@ export default function BillingRunPage() {
       )}
     </div>
   );
+}
+
+/** Cleans rate summary: trims trailing zeros from decimals (e.g. $3.9500 → $3.95) */
+function formatRate(summary: string): string {
+  return summary.replace(/\$(\d+\.\d+?)0+(?=\/|,|\s|\)|\b)/g, (_, num) => `$${parseFloat(num).toFixed(2)}`);
 }
