@@ -17,6 +17,7 @@ interface GridRow {
   is_consolidated: boolean;
   per_location_cap: string | null;
   capped_locations?: number;
+  units_in_capped_locations?: number;
   cap_amount?: number;
   flat_rate?: number;
   tier_1_rate?: number;
@@ -54,27 +55,39 @@ export default function BillingRunPage() {
   useEffect(() => { loadGrid(); }, [billingMonth]);
 
   // Client-side recalculation
+  const calcNormal = (units: number, row: GridRow): number => {
+    if (units === 0) return 0;
+    if (row.pricing_model === "flat_per_unit" && row.flat_rate) {
+      return units * row.flat_rate;
+    } else if (row.pricing_model === "tiered_per_unit" && row.tier_1_rate && row.tier_1_unit_count && row.tier_2_rate) {
+      const t1 = Math.min(units, row.tier_1_unit_count);
+      const t2 = Math.max(units - row.tier_1_unit_count, 0);
+      return t1 * row.tier_1_rate + t2 * row.tier_2_rate;
+    }
+    return 0;
+  };
+
   const recalcRow = useCallback((row: GridRow): GridRow => {
     if (row.active_units === 0 || !row.has_rate_plan) {
       return { ...row, calculated_total: 0 };
     }
 
     let total = 0;
-    const units = row.active_units;
 
-    if (row.pricing_model === "flat_per_unit" && row.flat_rate) {
-      total = units * row.flat_rate;
-    } else if (row.pricing_model === "tiered_per_unit" && row.tier_1_rate && row.tier_1_unit_count && row.tier_2_rate) {
-      const t1 = Math.min(units, row.tier_1_unit_count);
-      const t2 = Math.max(units - row.tier_1_unit_count, 0);
-      total = t1 * row.tier_1_rate + t2 * row.tier_2_rate;
-    }
-
-    // Apply cap
-    if (row.cap_amount) {
-      if (row.per_location_cap && row.capped_locations && row.capped_locations > 0) {
-        total = row.capped_locations * row.cap_amount;
-      } else if (!row.per_location_cap) {
+    if (row.per_location_cap && row.cap_amount) {
+      // Per-location cap logic:
+      // total = (capped_locations × cap_amount) + (remaining_units × rate)
+      const cappedLocs = row.capped_locations || 0;
+      const unitsInCapped = row.units_in_capped_locations || 0;
+      const cappedAmount = cappedLocs * row.cap_amount;
+      const remainingUnits = Math.max(row.active_units - unitsInCapped, 0);
+      const remainingAmount = calcNormal(remainingUnits, row);
+      total = cappedAmount + remainingAmount;
+    } else {
+      // Normal calc
+      total = calcNormal(row.active_units, row);
+      // Per-client cap
+      if (row.cap_amount) {
         total = Math.min(total, row.cap_amount);
       }
     }
@@ -99,6 +112,17 @@ export default function BillingRunPage() {
       prev.map((row) => {
         if (row.client_id !== clientId) return row;
         const updated = { ...row, capped_locations: value };
+        return recalcRow(updated);
+      })
+    );
+  };
+
+  const updateUnitsInCapped = (clientId: number, value: number) => {
+    setSaved(false);
+    setGrid((prev) =>
+      prev.map((row) => {
+        if (row.client_id !== clientId) return row;
+        const updated = { ...row, units_in_capped_locations: value };
         return recalcRow(updated);
       })
     );
@@ -370,21 +394,38 @@ export default function BillingRunPage() {
 
                     {/* Capped Locations — only for per_location clients */}
                     {row.per_location_cap && (
-                      <div>
-                        <label className="text-[10px] font-semibold text-amber-600 uppercase block mb-1">
-                          Locations over cap
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          className="input-field !w-20 !py-1 text-center font-semibold border-amber-300 focus:border-amber-500"
-                          placeholder="0"
-                          value={row.capped_locations || ""}
-                          onChange={(e) => updateCappedLocations(row.client_id, parseInt(e.target.value) || 0)}
-                          disabled={saved}
-                        />
-                        <p className="text-[10px] text-amber-500 mt-0.5">${row.cap_amount}/loc cap</p>
-                      </div>
+                      <>
+                        <div>
+                          <label className="text-[10px] font-semibold text-amber-600 uppercase block mb-1">
+                            Capped Locations
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="input-field !w-16 !py-1 text-center font-semibold border-amber-300 focus:border-amber-500"
+                            placeholder="0"
+                            value={row.capped_locations || ""}
+                            onChange={(e) => updateCappedLocations(row.client_id, parseInt(e.target.value) || 0)}
+                            disabled={saved}
+                          />
+                          <p className="text-[10px] text-amber-500 mt-0.5"># locs at cap</p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-semibold text-amber-600 uppercase block mb-1">
+                            Units in those locs
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="input-field !w-16 !py-1 text-center font-semibold border-amber-300 focus:border-amber-500"
+                            placeholder="0"
+                            value={row.units_in_capped_locations || ""}
+                            onChange={(e) => updateUnitsInCapped(row.client_id, parseInt(e.target.value) || 0)}
+                            disabled={saved}
+                          />
+                          <p className="text-[10px] text-amber-500 mt-0.5">terminals in capped locs</p>
+                        </div>
+                      </>
                     )}
 
                     {/* Divider */}
