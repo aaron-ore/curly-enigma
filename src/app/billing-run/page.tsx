@@ -15,6 +15,8 @@ interface GridRow {
   calculated_total: number;
   calc_error?: string;
   is_consolidated: boolean;
+  per_location_cap: string | null;
+  capped_locations?: number;
 }
 
 export default function BillingRunPage() {
@@ -43,9 +45,17 @@ export default function BillingRunPage() {
     setGrid((prev) =>
       prev.map((row) => {
         if (row.client_id !== clientId) return row;
-        // Recalculate on the client side (simplified — real calc happens server-side on finalize)
         const newSource = row.source === "imported" ? "imported_overridden" : row.source;
         return { ...row, active_units: value, source: newSource };
+      })
+    );
+  };
+
+  const updateCappedLocations = (clientId: number, value: number) => {
+    setGrid((prev) =>
+      prev.map((row) => {
+        if (row.client_id !== clientId) return row;
+        return { ...row, capped_locations: value };
       })
     );
   };
@@ -177,6 +187,20 @@ export default function BillingRunPage() {
                       onChange={(e) => updateUnits(row.client_id, parseInt(e.target.value) || 0)}
                       disabled={finalized}
                     />
+                    {row.per_location_cap && (
+                      <div className="mt-1">
+                        <input
+                          type="number"
+                          min="0"
+                          className="input-field w-20 text-center text-xs"
+                          placeholder="# locs"
+                          value={row.capped_locations || ""}
+                          onChange={(e) => updateCappedLocations(row.client_id, parseInt(e.target.value) || 0)}
+                          disabled={finalized}
+                        />
+                        <span className="text-xs text-amber-600 ml-1">locations</span>
+                      </div>
+                    )}
                   </td>
                   <td>
                     <span className={`badge text-xs ${
@@ -198,6 +222,7 @@ export default function BillingRunPage() {
                     {row.calc_error && <span className="badge status-overdue text-xs">{row.calc_error}</span>}
                     {!row.has_rate_plan && <span className="badge status-overdue text-xs">No rate</span>}
                     {row.billing_type === "auto_charge" && <span className="badge bg-blue-50 text-blue-600 text-xs">Auto</span>}
+                    {row.per_location_cap && !row.capped_locations && <span className="badge bg-amber-50 text-amber-700 text-xs">Enter # locations above</span>}
                   </td>
                 </tr>
               ))}
