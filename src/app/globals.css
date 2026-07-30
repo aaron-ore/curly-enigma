@@ -6,8 +6,8 @@
   --brand-blue: #0066FF;
   --brand-green: #9CFF5F;
   --brand-light: #E8F4FD;
-  --glass-bg: rgba(232, 244, 253, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.3);
+  --glass-bg: rgba(232, 244, 253, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.4);
 }
 
 body {
@@ -16,7 +16,18 @@ body {
   min-height: 100vh;
 }
 
-/* Glass effect utility */
+/* Glass navbar — distinct, strong blur + shadow to float above content */
+.glass-nav {
+  background: rgba(225, 240, 255, 0.55);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow:
+    0 1px 3px rgba(0, 102, 255, 0.06),
+    0 8px 32px rgba(0, 102, 255, 0.04);
+}
+
+/* Legacy glass class (for backward compat if used elsewhere) */
 .glass {
   background: var(--glass-bg);
   backdrop-filter: blur(16px);
@@ -24,17 +35,26 @@ body {
   border: 1px solid var(--glass-border);
 }
 
-/* Card glass effect */
+/* Card — real shadow for depth against the gradient background */
 .glass-card {
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0, 102, 255, 0.06);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
 }
 
-/* Status colors consistent with CodePay design system */
+.glass-card:hover {
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.06),
+    0 12px 32px rgba(0, 0, 0, 0.08);
+}
+
+/* Status colors */
 .status-active { color: #16a34a; background: #dcfce7; }
 .status-pending { color: #ca8a04; background: #fef9c3; }
 .status-charged { color: #0066FF; background: #dbeafe; }
@@ -45,7 +65,7 @@ body {
 .status-consolidated { color: #0891b2; background: #cffafe; }
 .status-inactive { color: #6b7280; background: #f3f4f6; }
 
-/* Table styles */
+/* Table styles — tighter padding, stronger row lines */
 .data-table {
   width: 100%;
   border-collapse: separate;
@@ -53,26 +73,35 @@ body {
 }
 
 .data-table th {
-  background: rgba(232, 244, 253, 0.5);
+  background: rgba(232, 244, 253, 0.6);
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #475569;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;
   text-align: left;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1.5px solid #e2e8f0;
 }
 
 .data-table td {
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f1f5f9;
-  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e8ecf1;
+  font-size: 0.8125rem;
   color: #1e293b;
 }
 
 .data-table tbody tr:hover {
-  background: rgba(232, 244, 253, 0.3);
+  background: rgba(232, 244, 253, 0.35);
+}
+
+/* Overdue row — stronger separator */
+.data-table tbody tr.row-overdue {
+  border-left: 3px solid #ef4444;
+}
+
+.data-table tbody tr.row-overdue td {
+  border-bottom: 1.5px solid #fecaca;
 }
 
 /* Input styles */
@@ -81,7 +110,7 @@ body {
   padding: 0.5rem 0.75rem;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   transition: all 0.2s;
   background: white;
 }
@@ -99,14 +128,15 @@ body {
   padding: 0.5rem 1rem;
   border-radius: 8px;
   font-weight: 500;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(0, 102, 255, 0.2);
 }
 
 .btn-primary:hover {
   background: #0052cc;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 102, 255, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 102, 255, 0.3);
 }
 
 .btn-secondary {
@@ -115,14 +145,16 @@ body {
   padding: 0.5rem 1rem;
   border-radius: 8px;
   font-weight: 500;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   border: 1px solid #e2e8f0;
   transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .btn-secondary:hover {
   background: #f8fafc;
   border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 /* Badge */
@@ -131,8 +163,8 @@ body {
   align-items: center;
   padding: 0.125rem 0.5rem;
   border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 /* Animations */
