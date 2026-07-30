@@ -1,6 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
+// DELETE /api/rate-plans?id=123 — delete a rate plan
+export async function DELETE(request: NextRequest) {
+  try {
+    const id = request.nextUrl.searchParams.get("id");
+    if (!id) {
+      return NextResponse.json({ error: "id parameter required" }, { status: 400 });
+    }
+
+    const result = await query("DELETE FROM rate_plans WHERE id = $1 RETURNING id", [id]);
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: "Rate plan not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ deleted: true, id: result.rows[0].id });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: "Failed to delete rate plan", detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
 // POST /api/rate-plans — create a new rate plan for a client
 export async function POST(request: NextRequest) {
   try {
