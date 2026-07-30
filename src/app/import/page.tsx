@@ -1,0 +1,286 @@
+"use client";
+
+import { useState } from "react";
+
+interface ImportResult {
+  import_id: number;
+  total: number;
+  auto_excluded: number;
+  review_flagged: number;
+  active: number;
+  unmapped: string[];
+}
+
+interface Transaction {
+  id: number;
+  store_name: string;
+  terminal_sn: string;
+  purchase_qty: number;
+  purchase_amount: number;
+  refund_qty: number;
+  refund_amount: number;
+  merchant_receivable: number;
+  test_flag: string | null;
+  included_in_active_count: boolean;
+  client_name: string | null;
+}
+
+export default function ImportPage() {
+  const [billingMonth, setBillingMonth] = useState(() => {
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return prev.toISOString().split("T")[0];
+  });
+  const [file, setFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [reviewItems, setReviewItems] = useState<Transaction[]>([]);
+
+  const handleImport = async () => {
+    if (!file) return;
+    setImporting(true);
+
+    try {
+      // Parse XLSX client-side
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+      // Find header row (contains "Store", "Terminal SN")
+      let headerIdx = -1;
+      for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+        const row = rawRows[i];
+        if (row && row.some((cell: any) => String(cell).includes("Store")) &&
+            row.some((cell: any) => String(cell).includes("Terminal SN"))) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      if (headerIdx === -1) {
+        alert("Could not find header row with 'Store' and 'Terminal SN' columns");
+        setImporting(false);
+        return;
+      }
+
+      const headers = rawRows[headerIdx].map((h: any) => String(h || "").trim());
+      const storeIdx = headers.findIndex((h: string) => h === "Store");
+      const storeTypeIdx = headers.findIndex((h: string) => h === "Store Type");
+      const terminalIdx = headers.findIndex((h: string) => h === "Terminal SN");
+      const purchaseIdx = headers.findIndex((h: string) => h === "Purchase");
+      const purchaseAmtIdx = headers.findIndex((h: string) => h === "Purchase Amount");
+      const refundIdx = headers.findIndex((h: string) => h === "Refund");
+      const refundAmtIdx = headers.findIndex((h: string) => h === "Refund Amount");
+      const discountIdx = headers.findIndex((h: string) => h === "Discount");
+      const feeIdx = headers.findIndex((h: string) => h === "Fee");
+      const vatIdx = headers.findIndex((h: string) => h === "VAT");
+      const receivableIdx = headers.findIndex((h: string) => h.includes("Merchant Receivable"));
+
+      const rows = [];
+      for (let i = headerIdx + 1; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (!row || !row[terminalIdx]) continue;
+        rows.push({
+          store_name: row[storeIdx] || "",
+          store_type: row[storeTypeIdx] || "",
+          terminal_sn: String(row[terminalIdx]),
+          purchase_qty: row[purchaseIdx] || 0,
+          purchase_amount: row[purchaseAmtIdx] || "0",
+          refund_qty: row[refundIdx] || 0,
+          refund_amount: row[refundAmtIdx] || "0",
+          discount: row[discountIdx] || "0",
+          fee: row[feeIdx] || "0",
+          vat: row[vatIdx] || "0",
+          merchant_receivable: row[receivableIdx] || "0",
+        });
+      }
+
+      // Send to API
+      const res = await fetch("/api/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          billing_month: billingMonth,
+          imported_by: "operator",
+          source_file_name: file.name,
+          rows,
+        }),
+      });
+
+      const importResult = await res.json();
+      setResult(importResult);
+
+      // Fetch the imported transactions for review
+      if (importResult.import_id) {
+        const txRes = await fetch(`/api/import?import_id=${importResult.import_id}`);
+        const txData = await txRes.json();
+        setTransactions(txData.transactions || []);
+        setReviewItems(
+          (txData.transactions || []).filter((t: Transaction) => t.test_flag === "review_full_refund")
+        );
+      }
+    } catch (err: any) {
+      alert("Import failed: " + err.message);
+    }
+
+    setImporting(false);
+  };
+
+  const handleReviewDecision = async (txId: number, include: boolean) => {
+    await fetch("/api/import/review", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decisions: [{ id: txId, included_in_active_count: include }] }),
+    });
+    setReviewItems((prev) => prev.filter((t) => t.id !== txId));
+    setTransactions((prev) =>
+      prev.map((t) => t.id === txId ? { ...t, included_in_active_count: include } : t)
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Import & Activity Review</h1>
+        <p className="text-sm text-slate-500 mt-1">Upload PayPilot export, review flagged transactions, resolve unmapped terminals</p>
+      </div>
+
+      {/* Upload Section */}
+      <div className="glass-card p-6">
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Upload PayPilot Export</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Billing Month</label>
+            <input type="date" className="input-field" value={billingMonth} onChange={(e) => setBillingMonth(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">PayPilot Export File (.xlsx)</label>
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="input-field"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </div>
+          <div>
+            <button
+              className="btn-primary w-full"
+              onClick={handleImport}
+              disabled={!file || importing}
+            >
+              {importing ? "Processing..." : "Import & Filter"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Import Results */}
+      {result && (
+        <div className="glass-card p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">Import Results</h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-slate-900">{result.total}</p>
+              <p className="text-xs text-slate-500">Total Rows</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-green-600">{result.active}</p>
+              <p className="text-xs text-slate-500">Active</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-slate-400">{result.auto_excluded}</p>
+              <p className="text-xs text-slate-500">Auto-Excluded</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-amber-500">{result.review_flagged}</p>
+              <p className="text-xs text-slate-500">Needs Review</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-red-500">{result.unmapped.length}</p>
+              <p className="text-xs text-slate-500">Unmapped</p>
+            </div>
+          </div>
+
+          {/* Unmapped terminals */}
+          {result.unmapped.length > 0 && (
+            <div className="mt-4 p-3 bg-red-50 rounded-lg">
+              <p className="text-sm font-medium text-red-700 mb-2">Unmapped Terminals (assign to a client before billing):</p>
+              <div className="flex flex-wrap gap-2">
+                {result.unmapped.map((sn) => (
+                  <span key={sn} className="badge bg-red-100 text-red-700 font-mono text-xs">{sn}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Review Flagged Transactions (Tier 2) */}
+      {reviewItems.length > 0 && (
+        <div className="glass-card p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-2">Review: Fully Refunded Terminals</h2>
+          <p className="text-sm text-slate-500 mb-4">
+            These terminals had all purchases refunded (merchant receivable = $0) but at amounts above $1.
+            Could be test transactions or genuine returns. Decide whether to include in active count.
+          </p>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>Terminal SN</th>
+                <th>Purchases</th>
+                <th>Purchase Amt</th>
+                <th>Refunds</th>
+                <th>Refund Amt</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reviewItems.map((tx) => (
+                <tr key={tx.id}>
+                  <td className="text-sm">{tx.store_name}</td>
+                  <td className="text-sm font-mono">{tx.terminal_sn}</td>
+                  <td className="text-sm">{tx.purchase_qty}</td>
+                  <td className="text-sm">${Number(tx.purchase_amount).toFixed(2)}</td>
+                  <td className="text-sm">{tx.refund_qty}</td>
+                  <td className="text-sm">${Number(tx.refund_amount).toFixed(2)}</td>
+                  <td>
+                    <div className="flex gap-2">
+                      <button
+                        className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                        onClick={() => handleReviewDecision(tx.id, true)}
+                      >
+                        Include
+                      </button>
+                      <button
+                        className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                        onClick={() => handleReviewDecision(tx.id, false)}
+                      >
+                        Exclude
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* All Transactions Summary */}
+      {transactions.length > 0 && reviewItems.length === 0 && (
+        <div className="glass-card p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-4">
+            Import Complete — {transactions.filter(t => t.included_in_active_count).length} active terminals ready for billing run
+          </h2>
+          <p className="text-sm text-slate-500">
+            All review items resolved. Proceed to the Billing Run page to finalize charges.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
