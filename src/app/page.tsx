@@ -4,20 +4,20 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 interface DashboardData {
+  totalOutstanding: number;
+  totalPaid: number;
   expectedRevenue: number;
-  actualCharged: number;
-  variance: number;
   pendingCount: number;
   overdueCount: number;
   missingRateCount: number;
   noUsageCount: number;
-  recentActivity: Array<{
-    id: number;
+  clientSummaries: Array<{
+    client_id: number;
     client_name: string;
-    billing_month: string;
-    status: string;
-    amount: number;
-    updated_at: string;
+    total_owed: number;
+    total_paid: number;
+    outstanding: number;
+    months_unpaid: number;
   }>;
 }
 
@@ -27,9 +27,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetch("/api/dashboard")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("API error");
+        return res.json();
+      })
       .then((d) => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch(() => { setData(null); setLoading(false); });
   }, []);
 
   if (loading) {
@@ -41,14 +44,14 @@ export default function Dashboard() {
   }
 
   const stats = data || {
+    totalOutstanding: 0,
+    totalPaid: 0,
     expectedRevenue: 0,
-    actualCharged: 0,
-    variance: 0,
     pendingCount: 0,
     overdueCount: 0,
     missingRateCount: 0,
     noUsageCount: 0,
-    recentActivity: [],
+    clientSummaries: [],
   };
 
   return (
@@ -57,7 +60,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">Monthly billing overview</p>
+          <p className="text-sm text-slate-500 mt-1">Billing overview — all time</p>
         </div>
         <Link href="/billing-run" className="btn-primary">
           Start Monthly Billing Run
@@ -67,83 +70,63 @@ export default function Dashboard() {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryCard
-          title="Expected Revenue"
-          value={formatCurrency(stats.expectedRevenue)}
-          subtitle="This month's calculated totals"
-          color="blue"
+          title="Outstanding Balance"
+          value={formatCurrency(stats.totalOutstanding)}
+          subtitle="Unpaid across all clients"
+          color="red"
         />
         <SummaryCard
-          title="Actual Charged"
-          value={formatCurrency(stats.actualCharged)}
-          subtitle="Charged + Paid"
+          title="Total Collected"
+          value={formatCurrency(stats.totalPaid)}
+          subtitle="All time paid"
           color="green"
         />
         <SummaryCard
-          title="Variance"
-          value={formatCurrency(stats.variance)}
-          subtitle="Expected - Actual"
-          color={stats.variance > 0 ? "yellow" : "green"}
+          title="Clients with Balance"
+          value={stats.pendingCount.toString()}
+          subtitle="Have unpaid charges"
+          color="yellow"
         />
         <SummaryCard
-          title="Pending"
-          value={stats.pendingCount.toString()}
-          subtitle="Awaiting charge"
+          title="Missing Rate Config"
+          value={stats.missingRateCount.toString()}
+          subtitle="Cannot calculate billing"
           color="slate"
         />
       </div>
 
-      {/* Secondary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="glass-card p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-600">Overdue</span>
-            <span className={`badge ${stats.overdueCount > 0 ? "status-overdue" : "status-paid"}`}>
-              {stats.overdueCount}
-            </span>
-          </div>
-        </div>
-        <div className="glass-card p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-600">Missing Rate Config</span>
-            <span className={`badge ${stats.missingRateCount > 0 ? "status-overdue" : "status-paid"}`}>
-              {stats.missingRateCount}
-            </span>
-          </div>
-        </div>
-        <div className="glass-card p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-600">No Usage This Month</span>
-            <span className="badge status-waived">{stats.noUsageCount}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Activity */}
+      {/* Outstanding by Client */}
       <div className="glass-card p-6">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Recent Activity</h2>
-        {stats.recentActivity.length === 0 ? (
-          <p className="text-sm text-slate-500">No recent activity. Start a billing run to generate charges.</p>
+        <h2 className="text-lg font-semibold text-slate-900 mb-4">Outstanding by Client</h2>
+        {stats.clientSummaries.length === 0 ? (
+          <p className="text-sm text-slate-500">No outstanding balances.</p>
         ) : (
           <table className="data-table">
             <thead>
               <tr>
                 <th>Client</th>
-                <th>Month</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Updated</th>
+                <th>Total Billed</th>
+                <th>Total Paid</th>
+                <th>Outstanding</th>
+                <th>Months Unpaid</th>
               </tr>
             </thead>
             <tbody>
-              {stats.recentActivity.map((item) => (
-                <tr key={item.id}>
-                  <td className="font-medium">{item.client_name}</td>
-                  <td>{item.billing_month}</td>
-                  <td>{formatCurrency(item.amount)}</td>
+              {stats.clientSummaries.map((item) => (
+                <tr key={item.client_id}>
                   <td>
-                    <span className={`badge status-${item.status}`}>{item.status}</span>
+                    <Link href={`/clients/${item.client_id}`} className="font-medium text-[#0066FF] hover:underline">
+                      {item.client_name}
+                    </Link>
                   </td>
-                  <td className="text-slate-500">{formatDate(item.updated_at)}</td>
+                  <td className="text-sm">{formatCurrency(item.total_owed)}</td>
+                  <td className="text-sm text-green-600">{formatCurrency(item.total_paid)}</td>
+                  <td className="font-semibold text-red-600">{formatCurrency(item.outstanding)}</td>
+                  <td>
+                    <span className={`badge ${item.months_unpaid > 3 ? "status-overdue" : "status-pending"}`}>
+                      {item.months_unpaid} months
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -164,6 +147,7 @@ function SummaryCard({ title, value, subtitle, color }: {
     blue: "border-l-[#0066FF]",
     green: "border-l-emerald-500",
     yellow: "border-l-amber-500",
+    red: "border-l-red-500",
     slate: "border-l-slate-400",
   };
 
@@ -181,10 +165,4 @@ function formatCurrency(amount: number): string {
     style: "currency",
     currency: "USD",
   }).format(amount);
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
