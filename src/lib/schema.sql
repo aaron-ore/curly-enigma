@@ -9,7 +9,7 @@ CREATE TYPE pricing_model_type AS ENUM ('flat_per_unit', 'tiered_per_unit');
 CREATE TYPE cap_scope_type AS ENUM ('per_client', 'per_location');
 CREATE TYPE usage_source_type AS ENUM ('imported', 'manual', 'imported_overridden');
 CREATE TYPE charge_status_type AS ENUM ('pending', 'charged', 'paid', 'overdue', 'disputed', 'waived', 'consolidated');
-CREATE TYPE test_flag_type AS ENUM ('auto_excluded', 'review_full_refund', 'review_low_value');
+CREATE TYPE test_flag_type AS ENUM ('auto_excluded', 'review_full_refund', 'review_low_value', 'review_cap_reached');
 
 -- Clients table
 CREATE TABLE clients (
