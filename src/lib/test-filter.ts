@@ -15,7 +15,7 @@ export interface PayPilotRow {
   merchant_receivable: number;
 }
 
-export type TestFlag = "auto_excluded" | "review_full_refund" | "review_low_value" | null;
+export type TestFlag = "auto_excluded" | "review_full_refund" | "review_low_value" | "review_cap_reached" | null;
 
 export interface FilterResult {
   test_flag: TestFlag;
