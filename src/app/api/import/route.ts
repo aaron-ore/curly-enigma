@@ -31,7 +31,11 @@ export async function POST(request: NextRequest) {
       review_flagged: 0,
       active: 0,
       unmapped: [] as string[],
+      new_clients: [] as { store_name: string; terminals: string[] }[],
     };
+
+    // Track unmapped terminals grouped by store name
+    const unmappedByStore: Record<string, Set<string>> = {};
 
     for (const row of rows) {
       const purchaseAmount = parsePayPilotAmount(row.purchase_amount);
@@ -67,6 +71,9 @@ export async function POST(request: NextRequest) {
 
       if (mapRes.rows.length === 0 && filterResult.test_flag !== "auto_excluded") {
         results.unmapped.push(row.terminal_sn);
+        const storeName = row.store_name || "Unknown";
+        if (!unmappedByStore[storeName]) unmappedByStore[storeName] = new Set();
+        unmappedByStore[storeName].add(row.terminal_sn);
       }
 
       // Insert transaction row
@@ -93,6 +100,20 @@ export async function POST(request: NextRequest) {
           filterResult.included_in_active_count,
         ]
       );
+    }
+
+    // Check which unmapped store names are truly new (not in clients table)
+    for (const [storeName, terminals] of Object.entries(unmappedByStore)) {
+      const existing = await query(
+        `SELECT id FROM clients WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+        [storeName]
+      );
+      if (existing.rows.length === 0) {
+        results.new_clients.push({
+          store_name: storeName,
+          terminals: Array.from(terminals),
+        });
+      }
     }
 
     return NextResponse.json({
