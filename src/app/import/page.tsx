@@ -53,8 +53,10 @@ export default function ImportPage() {
       let headerIdx = -1;
       for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
         const row = rawRows[i];
-        if (row && row.some((cell: any) => String(cell).includes("Store")) &&
-            row.some((cell: any) => String(cell).includes("Terminal SN"))) {
+        if (!row || !Array.isArray(row)) continue;
+        const rowStrs = row.map((cell: any) => String(cell ?? ""));
+        if (rowStrs.some((s: string) => s.includes("Store")) &&
+            rowStrs.some((s: string) => s.includes("Terminal SN"))) {
           headerIdx = i;
           break;
         }
@@ -66,18 +68,25 @@ export default function ImportPage() {
         return;
       }
 
-      const headers = rawRows[headerIdx].map((h: any) => String(h || "").trim());
-      const storeIdx = headers.findIndex((h: string) => h === "Store");
-      const storeTypeIdx = headers.findIndex((h: string) => h === "Store Type");
-      const terminalIdx = headers.findIndex((h: string) => h === "Terminal SN");
-      const purchaseIdx = headers.findIndex((h: string) => h === "Purchase");
-      const purchaseAmtIdx = headers.findIndex((h: string) => h === "Purchase Amount");
-      const refundIdx = headers.findIndex((h: string) => h === "Refund");
-      const refundAmtIdx = headers.findIndex((h: string) => h === "Refund Amount");
-      const discountIdx = headers.findIndex((h: string) => h === "Discount");
-      const feeIdx = headers.findIndex((h: string) => h === "Fee");
-      const vatIdx = headers.findIndex((h: string) => h === "VAT");
-      const receivableIdx = headers.findIndex((h: string) => h.includes("Merchant Receivable"));
+      // Normalize headers — handle sparse arrays and null cells
+      const rawHeader = rawRows[headerIdx];
+      const maxCol = rawHeader.length;
+      const headers: string[] = [];
+      for (let c = 0; c < maxCol; c++) {
+        headers.push(String(rawHeader[c] ?? "").trim());
+      }
+
+      const storeIdx = headers.findIndex((h) => h === "Store");
+      const storeTypeIdx = headers.findIndex((h) => h === "Store Type");
+      const terminalIdx = headers.findIndex((h) => h === "Terminal SN");
+      const purchaseIdx = headers.findIndex((h) => h === "Purchase");
+      const purchaseAmtIdx = headers.findIndex((h) => h === "Purchase Amount");
+      const refundIdx = headers.findIndex((h) => h === "Refund");
+      const refundAmtIdx = headers.findIndex((h) => h === "Refund Amount");
+      const discountIdx = headers.findIndex((h) => h === "Discount");
+      const feeIdx = headers.findIndex((h) => h === "Fee");
+      const vatIdx = headers.findIndex((h) => h === "VAT");
+      const receivableIdx = headers.findIndex((h) => h.includes("Merchant Receivable"));
 
       const rows = [];
       for (let i = headerIdx + 1; i < rawRows.length; i++) {
