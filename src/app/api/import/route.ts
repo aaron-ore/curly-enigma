@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     // --- Step 2: Bulk terminal mapping lookup ---
-    const allTerminals = [...new Set(parsed.map((r) => r.terminal_sn))];
+    const allTerminals = Array.from(new Set(parsed.map((r) => r.terminal_sn)));
     const mappedTerminals = new Set<string>();
 
     // Query in chunks of 500 to avoid query size limits
