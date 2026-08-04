@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -26,6 +26,7 @@ export default function ClientDetailPage() {
   const [editing, setEditing] = useState(false);
   const [showRateForm, setShowRateForm] = useState(false);
   const [deletingRateId, setDeletingRateId] = useState<number | null>(null);
+  const [editingRateId, setEditingRateId] = useState<number | null>(null);
 
   const fetchClient = () => {
     fetch(`/api/clients/${params.id}`)
@@ -125,47 +126,64 @@ export default function ClientDetailPage() {
             </thead>
             <tbody>
               {client.rate_plans.map((rp: any) => (
-                <tr key={rp.id}>
+                <React.Fragment key={rp.id}>
+                <tr>
                   <td className="text-sm">
-                    {rp.effective_start} {rp.effective_end ? `to ${rp.effective_end}` : "(current)"}
+                    {fmtDate(rp.effective_start)} {rp.effective_end ? `to ${fmtDate(rp.effective_end)}` : "(current)"}
                   </td>
                   <td className="text-sm capitalize">{rp.pricing_model.replace("_", " ")}</td>
                   <td className="text-sm">
                     {rp.pricing_model === "flat_per_unit"
-                      ? `$${rp.flat_rate}/unit`
-                      : `$${rp.tier_1_rate} x${rp.tier_1_unit_count}, then $${rp.tier_2_rate}`}
+                      ? `$${Number(rp.flat_rate).toFixed(2)}/unit`
+                      : `$${Number(rp.tier_1_rate).toFixed(2)} x${rp.tier_1_unit_count}, then $${Number(rp.tier_2_rate).toFixed(2)}`}
                   </td>
-                  <td className="text-sm">{rp.cap_amount ? `$${rp.cap_amount}/${rp.cap_scope || "client"}` : "—"}</td>
+                  <td className="text-sm">{rp.cap_amount ? `$${Number(rp.cap_amount).toFixed(2)}/${rp.cap_scope || "client"}` : "—"}</td>
                   <td className="text-sm text-slate-500">{rp.notes || "—"}</td>
                   <td>
-                    {deletingRateId === rp.id ? (
-                      <div className="flex gap-1">
-                        <button
-                          className="text-[10px] px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium hover:bg-red-200"
-                          onClick={async () => {
-                            const res = await fetch(`/api/rate-plans?id=${rp.id}`, { method: "DELETE" });
-                            if (res.ok) { setDeletingRateId(null); fetchClient(); }
-                          }}
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200"
-                          onClick={() => setDeletingRateId(null)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
+                    <div className="flex gap-1">
                       <button
-                        className="text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100"
-                        onClick={() => setDeletingRateId(rp.id)}
+                        className="text-[10px] px-2 py-0.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100"
+                        onClick={() => setEditingRateId(editingRateId === rp.id ? null : rp.id)}
                       >
-                        Delete
+                        Edit
                       </button>
-                    )}
+                      {deletingRateId === rp.id ? (
+                        <>
+                          <button
+                            className="text-[10px] px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium hover:bg-red-200"
+                            onClick={async () => {
+                              const res = await fetch(`/api/rate-plans?id=${rp.id}`, { method: "DELETE" });
+                              if (res.ok) { setDeletingRateId(null); fetchClient(); }
+                            }}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded hover:bg-slate-200"
+                            onClick={() => setDeletingRateId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100"
+                          onClick={() => setDeletingRateId(rp.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
+                {editingRateId === rp.id && (
+                  <tr>
+                    <td colSpan={6} className="!p-0">
+                      <EditRatePlanForm ratePlan={rp} onSaved={() => { setEditingRateId(null); fetchClient(); }} onCancel={() => setEditingRateId(null)} />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -199,7 +217,7 @@ export default function ClientDetailPage() {
                   <td><span className="badge bg-slate-100 text-slate-600 text-xs">{h.source}</span></td>
                   <td className="text-sm">${Number(h.calculated_total).toFixed(2)}</td>
                   <td className="text-sm">{h.amount_charged ? `$${Number(h.amount_charged).toFixed(2)}` : "—"}</td>
-                  <td className="text-sm text-slate-500">{h.date_charged || "—"}</td>
+                  <td className="text-sm text-slate-500">{h.date_charged ? fmtDate(h.date_charged) : "—"}</td>
                   <td>{h.status && <span className={`badge status-${h.status}`}>{h.status}</span>}</td>
                   <td>
                     {h.charge_id && h.status === "pending" && (
@@ -255,6 +273,7 @@ export default function ClientDetailPage() {
 }
 
 function EditClientForm({ client, onSaved }: { client: ClientDetail; onSaved: () => void }) {
+  const router = useRouter();
   const [form, setForm] = useState({
     name: client.name,
     status: client.status,
@@ -262,6 +281,7 @@ function EditClientForm({ client, onSaved }: { client: ClientDetail; onSaved: ()
     payment_method: client.payment_method,
     notes: client.notes || "",
   });
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,6 +291,11 @@ function EditClientForm({ client, onSaved }: { client: ClientDetail; onSaved: ()
       body: JSON.stringify(form),
     });
     onSaved();
+  };
+
+  const handleDelete = async () => {
+    const res = await fetch(`/api/clients/${client.id}`, { method: "DELETE" });
+    if (res.ok) router.push("/clients");
   };
 
   return (
@@ -298,8 +323,17 @@ function EditClientForm({ client, onSaved }: { client: ClientDetail; onSaved: ()
         <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
         <textarea className="input-field" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
       </div>
-      <div className="flex items-end">
+      <div className="flex items-end gap-3">
         <button type="submit" className="btn-primary">Save Changes</button>
+        {confirmDelete ? (
+          <div className="flex gap-2 items-center">
+            <span className="text-xs text-red-600">Delete this client?</span>
+            <button type="button" className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded font-medium hover:bg-red-200" onClick={handleDelete}>Yes, Delete</button>
+            <button type="button" className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded" onClick={() => setConfirmDelete(false)}>Cancel</button>
+          </div>
+        ) : (
+          <button type="button" className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100" onClick={() => setConfirmDelete(true)}>Delete Client</button>
+        )}
       </div>
     </form>
   );
@@ -400,4 +434,14 @@ function formatMonth(dateStr: string): string {
   if (!dateStr) return "";
   const d = new Date(dateStr);
   return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+/** Format date as MM-DD-YYYY, stripping any time/timezone */
+function fmtDate(dateStr: string): string {
+  if (!dateStr) return "";
+  // Handle ISO strings like "2026-01-14T00:00:00.000Z"
+  const raw = dateStr.split("T")[0];
+  const [y, m, d] = raw.split("-");
+  if (!y || !m || !d) return raw;
+  return `${m}-${d}-${y}`;
 }

@@ -41,12 +41,12 @@ export default function ClientsPage() {
   const formatRate = (c: Client): string => {
     if (!c.pricing_model) return "No rate";
     if (c.pricing_model === "flat_per_unit") {
-      let s = `$${c.flat_rate}/unit`;
-      if (c.cap_amount) s += ` (cap $${c.cap_amount})`;
+      let s = `$${Number(c.flat_rate).toFixed(2)}/unit`;
+      if (c.cap_amount) s += ` (cap $${Number(c.cap_amount).toFixed(2)})`;
       return s;
     }
-    let s = `$${c.tier_1_rate} x${c.tier_1_unit_count}, then $${c.tier_2_rate}`;
-    if (c.cap_amount) s += ` (cap $${c.cap_amount})`;
+    let s = `$${Number(c.tier_1_rate).toFixed(2)} x${c.tier_1_unit_count}, then $${Number(c.tier_2_rate).toFixed(2)}`;
+    if (c.cap_amount) s += ` (cap $${Number(c.cap_amount).toFixed(2)})`;
     return s;
   };
 
@@ -72,7 +72,7 @@ export default function ClientsPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
         <select
-          className="input-field max-w-[160px]"
+          className="input-field max-w-[180px] pr-8"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         >

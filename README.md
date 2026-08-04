@@ -4,43 +4,33 @@ Internal billing system for CodePay's SaaS fee management. Replaces the manual L
 
 ## Stack
 
-- **Frontend**: Next.js 14 (App Router) + Tailwind CSS
-- **Backend**: Next.js API Routes
-- **Database**: PostgreSQL (Vercel Postgres / Neon / Supabase)
-- **Deployment**: Vercel
+- **Frontend + Backend**: Next.js 14 (App Router) + Tailwind CSS
+- **Database**: PostgreSQL (Supabase)
+- **Hosting**: Vercel
+- **Code**: GitHub
 
-## Quick Start
+## Setup (No Terminal Required)
 
-```bash
-# 1. Install dependencies
-npm install
+### Step 1: Push to GitHub
+Upload the entire `codepay-billing/` folder as a GitHub repository.
 
-# 2. Set up environment
-cp .env.example .env
-# Edit .env with your DATABASE_URL
-
-# 3. Run migrations
-npm run db:migrate
-
-# 4. Seed with real client data
-npm run db:seed
-
-# 5. Start dev server
-npm run dev
-```
-
-## Deploy to Vercel
-
-1. Push this repo to GitHub
-2. Import into Vercel
-3. Add `DATABASE_URL` as an environment variable (use Vercel Postgres or connect external Neon/Supabase)
+### Step 2: Connect Vercel
+1. Go to [vercel.com](https://vercel.com), import the GitHub repo
+2. If `codepay-billing/` is a subfolder in a larger repo, set **Root Directory** to `codepay-billing` in Project Settings → General
+3. Add environment variable: `DATABASE_URL` = your Supabase connection string
 4. Deploy — Vercel handles the build automatically
-5. After first deploy, run migrations:
-   ```bash
-   vercel env pull .env.local
-   npm run db:migrate
-   npm run db:seed
-   ```
+
+### Step 3: Set Up Database (Supabase SQL Editor)
+Run these in order in Supabase's **SQL Editor** (no terminal needed):
+
+1. **Create schema**: Copy-paste the entire contents of `src/lib/schema.sql` and execute
+2. **Seed clients**: Copy-paste the client INSERT statements from `scripts/seed.js` (the `clients` array section) — or run the seed script if you prefer terminal
+3. **Load historical data**: Copy-paste the entire contents of `scripts/seed-historical.sql` and execute
+
+### Step 4: Done
+Visit your Vercel URL. The app is live with all historical billing data.
+
+---
 
 ## Architecture
 
@@ -73,12 +63,19 @@ npm run dev
 - Rate plans are effective-dated, never edited — new row for rate changes
 - Variance between calculated_total and amount_charged requires a reason
 
-## Data Model
+---
 
-See `src/lib/schema.sql` for the full schema. Core tables:
-- `clients` — with parent/child relationships
-- `rate_plans` — effective-dated pricing rules
-- `terminal_client_map` — PayPilot terminal → billing client mapping
-- `paypilot_imports` / `paypilot_transactions` — import batches + raw data
-- `usage_records` — monthly active unit counts per client
-- `charges` — billing events with status machine
+## Optional: Local Development (if you want to run it on your machine)
+
+```bash
+npm install
+cp .env.example .env   # Add your Supabase DATABASE_URL
+npm run dev
+```
+
+## Optional: Terminal-based DB setup
+
+```bash
+npm run db:migrate     # Runs schema.sql against DATABASE_URL
+npm run db:seed        # Seeds clients + rate plans
+```

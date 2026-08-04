@@ -95,3 +95,33 @@ export async function PUT(
     );
   }
 }
+
+// DELETE /api/clients/[id] — delete a client and all related data
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const clientId = parseInt(params.id);
+
+    // Delete in order: charges, usage_records, rate_plans, terminal_client_map, then client
+    await query(`DELETE FROM charges WHERE client_id = $1`, [clientId]);
+    await query(`DELETE FROM usage_records WHERE client_id = $1`, [clientId]);
+    await query(`DELETE FROM rate_plans WHERE client_id = $1`, [clientId]);
+    await query(`DELETE FROM terminal_client_map WHERE client_id = $1`, [clientId]);
+    // Unlink any children
+    await query(`UPDATE clients SET parent_client_id = NULL WHERE parent_client_id = $1`, [clientId]);
+    const result = await query(`DELETE FROM clients WHERE id = $1 RETURNING id`, [clientId]);
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ deleted: true, id: clientId });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: "Failed to delete client", detail: error.message },
+      { status: 500 }
+    );
+  }
+}
