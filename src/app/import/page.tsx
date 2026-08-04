@@ -12,6 +12,7 @@ interface ImportResult {
   total: number;
   auto_excluded: number;
   review_flagged: number;
+  review_cap: number;
   active: number;
   unmapped: string[];
   new_clients: NewClientCandidate[];
@@ -43,6 +44,7 @@ export default function ImportPage() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [reviewItems, setReviewItems] = useState<Transaction[]>([]);
+  const [capReviewItems, setCapReviewItems] = useState<Transaction[]>([]);
   const [newClients, setNewClients] = useState<NewClientCandidate[]>([]);
   const [creatingClient, setCreatingClient] = useState<string | null>(null);
 
@@ -147,6 +149,9 @@ export default function ImportPage() {
         setReviewItems(
           (txData.transactions || []).filter((t: Transaction) => t.test_flag === "review_full_refund")
         );
+        setCapReviewItems(
+          (txData.transactions || []).filter((t: Transaction) => t.test_flag === "review_cap_reached")
+        );
       }
     } catch (err: any) {
       alert("Import failed: " + err.message);
@@ -206,6 +211,7 @@ export default function ImportPage() {
       body: JSON.stringify({ decisions: [{ id: txId, included_in_active_count: include }] }),
     });
     setReviewItems((prev) => prev.filter((t) => t.id !== txId));
+    setCapReviewItems((prev) => prev.filter((t) => t.id !== txId));
     setTransactions((prev) =>
       prev.map((t) => t.id === txId ? { ...t, included_in_active_count: include } : t)
     );
@@ -217,6 +223,7 @@ export default function ImportPage() {
     setResult(null);
     setTransactions([]);
     setReviewItems([]);
+    setCapReviewItems([]);
     setNewClients([]);
   };
 
@@ -274,7 +281,7 @@ export default function ImportPage() {
       {result && (
         <div className="glass-card p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">Import Results</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
             <div className="text-center">
               <p className="text-2xl font-bold text-slate-900">{result.total}</p>
               <p className="text-xs text-slate-500">Total Rows</p>
@@ -289,7 +296,11 @@ export default function ImportPage() {
             </div>
             <div className="text-center">
               <p className="text-2xl font-bold text-amber-500">{result.review_flagged}</p>
-              <p className="text-xs text-slate-500">Needs Review</p>
+              <p className="text-xs text-slate-500">Review (Refund)</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-purple-500">{result.review_cap || 0}</p>
+              <p className="text-xs text-slate-500">Review (Cap)</p>
             </div>
             <div className="text-center">
               <p className="text-2xl font-bold text-red-500">{result.unmapped.length}</p>
@@ -334,11 +345,61 @@ export default function ImportPage() {
           <div className="p-3 bg-red-50 rounded-lg">
             <p className="text-sm font-medium text-red-700 mb-2">Unmapped Terminals (assign to a client before billing):</p>
             <div className="flex flex-wrap gap-2">
-              {[...new Set(result.unmapped)].map((sn) => (
+              {Array.from(new Set(result.unmapped)).map((sn) => (
                 <span key={sn} className="badge bg-red-100 text-red-700 font-mono text-xs">{sn}</span>
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Review: Cap Reached (multi-terminal locations hitting cap) */}
+      {capReviewItems.length > 0 && (
+        <div className="glass-card p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-2">Review: Cap Reached</h2>
+          <p className="text-sm text-slate-500 mb-4">
+            These locations have multiple terminals whose combined billing would hit or exceed the rate cap.
+            Verify these are legitimate separate terminals (not duplicates or test devices) before billing at the capped rate.
+          </p>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Store (Location)</th>
+                <th>Terminal SN</th>
+                <th>Purchases</th>
+                <th>Purchase Amt</th>
+                <th>Receivable</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {capReviewItems.map((tx) => (
+                <tr key={tx.id} className="bg-purple-50/50">
+                  <td className="text-sm">{tx.store_name}</td>
+                  <td className="text-sm font-mono">{tx.terminal_sn}</td>
+                  <td className="text-sm">{tx.purchase_qty}</td>
+                  <td className="text-sm">${Number(tx.purchase_amount).toFixed(2)}</td>
+                  <td className="text-sm">${Number(tx.merchant_receivable).toFixed(2)}</td>
+                  <td>
+                    <div className="flex gap-2">
+                      <button
+                        className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                        onClick={() => handleReviewDecision(tx.id, true)}
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                        onClick={() => handleReviewDecision(tx.id, false)}
+                      >
+                        Exclude
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -395,7 +456,7 @@ export default function ImportPage() {
       )}
 
       {/* All Transactions Summary */}
-      {transactions.length > 0 && reviewItems.length === 0 && (
+      {transactions.length > 0 && reviewItems.length === 0 && capReviewItems.length === 0 && (
         <div className="glass-card p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4">
             Import Complete — {transactions.filter(t => t.included_in_active_count).length} active terminals ready for billing run
