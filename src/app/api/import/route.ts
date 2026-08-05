@@ -196,17 +196,41 @@ export async function POST(request: NextRequest) {
       const tier2Rate = parseFloat(rp.tier_2_rate || "0");
       const tier1Count = parseInt(rp.tier_1_unit_count || "0");
       const capAmount = parseFloat(rp.cap_amount || "0");
+      const capScope = rp.cap_scope || "per_client";
 
-      if (flatRate > 0) {
-        calculatedTotal = active * flatRate;
-      } else if (tier1Rate > 0) {
-        const t1 = Math.min(active, tier1Count || 1);
-        const t2 = Math.max(0, active - t1);
-        calculatedTotal = t1 * tier1Rate + t2 * tier2Rate;
-      }
+      // Helper: calculate normal rate for N units
+      const calcUnits = (n: number) => {
+        if (flatRate > 0) return n * flatRate;
+        if (tier1Rate > 0) {
+          const t1 = Math.min(n, tier1Count || 1);
+          const t2 = Math.max(0, n - t1);
+          return t1 * tier1Rate + t2 * tier2Rate;
+        }
+        return 0;
+      };
 
-      if (capAmount > 0 && calculatedTotal > capAmount) {
-        calculatedTotal = capAmount;
+      if (capAmount > 0 && capScope === "per_location") {
+        // Per-location cap: group active terminals by store, cap each store independently
+        const storeGroups: Record<string, number> = {};
+        for (const row of parsed) {
+          if (row.test_flag === "auto_excluded") continue;
+          if (row.test_flag === "review_full_refund") continue;
+          const store = row.store_name || "Unknown";
+          storeGroups[store] = (storeGroups[store] || 0) + 1;
+        }
+
+        let total = 0;
+        for (const [, count] of Object.entries(storeGroups)) {
+          const storeTotal = calcUnits(count);
+          total += Math.min(storeTotal, capAmount);
+        }
+        calculatedTotal = Math.round(total * 100) / 100;
+      } else {
+        // Flat calculation or per-client cap
+        calculatedTotal = calcUnits(active);
+        if (capAmount > 0 && calculatedTotal > capAmount) {
+          calculatedTotal = capAmount;
+        }
       }
     }
 

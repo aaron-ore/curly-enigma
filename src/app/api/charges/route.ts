@@ -72,6 +72,50 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// DELETE /api/charges?id=X — delete a charge and its associated usage_record
+export async function DELETE(request: NextRequest) {
+  try {
+    const id = request.nextUrl.searchParams.get("id");
+    if (!id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    // Get charge details first so we can delete the matching usage_record
+    const chargeRes = await query(`SELECT client_id, billing_month FROM charges WHERE id = $1`, [id]);
+    if (chargeRes.rows.length === 0) {
+      return NextResponse.json({ error: "Charge not found" }, { status: 404 });
+    }
+
+    const { client_id, billing_month } = chargeRes.rows[0];
+
+    // Delete the charge
+    await query(`DELETE FROM charges WHERE id = $1`, [id]);
+
+    // Delete the matching usage_record
+    await query(
+      `DELETE FROM usage_records WHERE client_id = $1 AND billing_month = $2`,
+      [client_id, billing_month]
+    );
+
+    // Also delete associated import data if it exists
+    const usageRes = await query(
+      `SELECT source_import_id FROM usage_records WHERE client_id = $1 AND billing_month = $2`,
+      [client_id, billing_month]
+    );
+    // Usage record already deleted above, but let's clean up any orphan import
+    // (transactions cascade-delete from paypilot_imports)
+    // Only delete import if no other usage_records reference it
+    // For safety, we won't auto-delete imports — they serve as audit trail
+
+    return NextResponse.json({ success: true, deleted_charge_id: parseInt(id) });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: "Failed to delete charge", detail: error.message },
+      { status: 500 }
+    );
+  }
+}
+
 // PUT /api/charges — update charge status (pending -> charged -> paid, etc.)
 export async function PUT(request: NextRequest) {
   try {

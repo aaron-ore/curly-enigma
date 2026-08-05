@@ -247,47 +247,61 @@ export default function ClientDetailPage() {
                   <td className="text-sm text-slate-500">{h.date_charged ? fmtDate(h.date_charged) : "\u2014"}</td>
                   <td>{h.status && <span className={`badge status-${h.status}`}>{h.status}</span>}</td>
                   <td>
-                    {h.charge_id && h.status === "pending" && (
-                      <button
-                        className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-medium"
-                        onClick={async () => {
-                          await fetch("/api/charges", {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              id: h.charge_id, status: "charged",
-                              amount_charged: h.calculated_total,
-                              date_charged: new Date().toISOString().split("T")[0],
-                            }),
-                          });
-                          fetchClient();
-                        }}
-                      >
-                        Mark Charged
-                      </button>
-                    )}
-                    {h.charge_id && h.status === "charged" && (
-                      <button
-                        className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 font-medium"
-                        onClick={async () => {
-                          await fetch("/api/charges", {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              id: h.charge_id, status: "paid",
-                              amount_received: h.amount_charged || h.calculated_total,
-                              date_received: new Date().toISOString().split("T")[0],
-                            }),
-                          });
-                          fetchClient();
-                        }}
-                      >
-                        Mark Paid
-                      </button>
-                    )}
-                    {h.charge_id && h.status === "paid" && (
-                      <span className="text-[10px] text-emerald-600 font-medium">Paid</span>
-                    )}
+                    <div className="flex gap-1 items-center flex-wrap">
+                      {h.charge_id && h.status === "pending" && (
+                        <button
+                          className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-medium"
+                          onClick={async () => {
+                            await fetch("/api/charges", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                id: h.charge_id, status: "charged",
+                                amount_charged: h.calculated_total,
+                                date_charged: new Date().toISOString().split("T")[0],
+                              }),
+                            });
+                            fetchClient();
+                          }}
+                        >
+                          Mark Charged
+                        </button>
+                      )}
+                      {h.charge_id && h.status === "charged" && (
+                        <button
+                          className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 font-medium"
+                          onClick={async () => {
+                            await fetch("/api/charges", {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                id: h.charge_id, status: "paid",
+                                amount_received: h.amount_charged || h.calculated_total,
+                                date_received: new Date().toISOString().split("T")[0],
+                              }),
+                            });
+                            fetchClient();
+                          }}
+                        >
+                          Mark Paid
+                        </button>
+                      )}
+                      {h.charge_id && h.status === "paid" && (
+                        <span className="text-[10px] text-emerald-600 font-medium">Paid</span>
+                      )}
+                      {h.charge_id && (
+                        <button
+                          className="text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100"
+                          onClick={async () => {
+                            if (!confirm(`Delete billing for ${formatMonth(h.billing_month)}? This removes the charge and usage record.`)) return;
+                            await fetch(`/api/charges?id=${h.charge_id}`, { method: "DELETE" });
+                            fetchClient();
+                          }}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -786,6 +800,11 @@ function AddRatePlanForm({ clientId, onCreated }: { clientId: number; onCreated:
       <div className="flex items-end">
         <button type="submit" className="btn-primary text-sm">Add Rate Plan</button>
       </div>
+      {form.cap_scope === "per_location" && form.cap_amount && (
+        <div className="md:col-span-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+          <strong>Per-location cap:</strong> Each store/location is capped at ${form.cap_amount}. Locations are auto-detected from PayPilot imports (each unique store name = 1 location). If a location&apos;s normal billing exceeds the cap, it&apos;s charged exactly ${form.cap_amount}. Locations under the cap are billed at normal rate.
+        </div>
+      )}
     </form>
   );
 }
