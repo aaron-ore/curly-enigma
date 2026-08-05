@@ -321,8 +321,9 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
   const [parsing, setParsing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [parsedRows, setParsedRows] = useState<any[]>([]);
-  const [preview, setPreview] = useState<{ total: number; active: number; auto_excluded: number; review_flagged: number; merchants: { name: string; terminals: number }[] } | null>(null);
+  const [preview, setPreview] = useState<{ total: number; active: number; auto_excluded: number; review_flagged: number; merchants: { name: string; terminals: number }[]; flaggedItems: any[] } | null>(null);
   const [importResult, setImportResult] = useState<any>(null);
+  const [showFlagged, setShowFlagged] = useState(false);
 
   const handleParse = async () => {
     if (!file) return;
@@ -396,11 +397,15 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
       // Client-side test-filter preview (simplified)
       let autoExcluded = 0;
       let reviewFlagged = 0;
+      const flaggedItems: any[] = [];
       for (const r of rows) {
         const amt = parseFloat(String(r.purchase_amount).replace(/[(),]/g, "")) || 0;
         const recv = parseFloat(String(r.merchant_receivable).replace(/[(),]/g, "")) || 0;
         if (recv === 0 && amt <= 1) autoExcluded++;
-        else if (recv === 0 && amt > 1) reviewFlagged++;
+        else if (recv === 0 && amt > 1) {
+          reviewFlagged++;
+          flaggedItems.push(r);
+        }
       }
 
       const merchants = Object.entries(merchantMap)
@@ -414,6 +419,7 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
         auto_excluded: autoExcluded,
         review_flagged: reviewFlagged,
         merchants,
+        flaggedItems,
       });
       setStep("preview");
     } catch (err: any) {
@@ -502,6 +508,58 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
                   <p className="text-xs text-slate-500">Needs Review</p>
                 </div>
               </div>
+
+              {/* Flagged items review */}
+              {preview.review_flagged > 0 && (
+                <div>
+                  <button
+                    className="w-full text-left text-sm font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 hover:bg-amber-100 flex items-center justify-between"
+                    onClick={() => setShowFlagged(!showFlagged)}
+                  >
+                    <span>Review {preview.review_flagged} flagged terminal{preview.review_flagged > 1 ? "s" : ""} (fully refunded, amt &gt; $1)</span>
+                    <span className="text-lg">{showFlagged ? "\u25B2" : "\u25BC"}</span>
+                  </button>
+                  {showFlagged && (
+                    <div className="mt-2 max-h-48 overflow-y-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-1.5 text-left text-xs font-medium text-slate-500">Store</th>
+                            <th className="px-3 py-1.5 text-left text-xs font-medium text-slate-500">Terminal SN</th>
+                            <th className="px-3 py-1.5 text-left text-xs font-medium text-slate-500">Purchase Amt</th>
+                            <th className="px-3 py-1.5 text-left text-xs font-medium text-slate-500">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {preview.flaggedItems.map((item: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-1.5">{item.store_name}</td>
+                              <td className="px-3 py-1.5 font-mono text-xs">{item.terminal_sn}</td>
+                              <td className="px-3 py-1.5">${parseFloat(String(item.purchase_amount).replace(/[(),]/g, "")).toFixed(2)}</td>
+                              <td className="px-3 py-1.5">
+                                <button
+                                  className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                  onClick={() => {
+                                    setParsedRows((prev) => prev.filter((r) => r.terminal_sn !== item.terminal_sn));
+                                    setPreview((prev) => prev ? {
+                                      ...prev,
+                                      review_flagged: prev.review_flagged - 1,
+                                      flaggedItems: prev.flaggedItems.filter((f: any) => f.terminal_sn !== item.terminal_sn),
+                                      total: prev.total - 1,
+                                    } : prev);
+                                  }}
+                                >
+                                  Exclude
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Merchant breakdown */}
               <div>
