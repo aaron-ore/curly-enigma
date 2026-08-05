@@ -78,8 +78,9 @@ export async function POST(request: NextRequest) {
 
     // --- Step 2: Cap-review flag ---
     // Check if client has a cap in their rate plan
-    const rateRes = await query(
-      `SELECT cap_amount, flat_rate, tier_1_rate, tier_2_rate, tier_1_unit_count
+    // First try exact match for billing month, then fallback to most recent plan
+    let rateRes = await query(
+      `SELECT cap_amount, cap_scope, flat_rate, tier_1_rate, tier_2_rate, tier_1_unit_count
        FROM rate_plans
        WHERE client_id = $1
          AND effective_start <= $2
@@ -87,6 +88,16 @@ export async function POST(request: NextRequest) {
        ORDER BY effective_start DESC LIMIT 1`,
       [client_id, billing_month]
     );
+    if (rateRes.rows.length === 0) {
+      // Fallback: get the most recent rate plan for this client regardless of date
+      rateRes = await query(
+        `SELECT cap_amount, cap_scope, flat_rate, tier_1_rate, tier_2_rate, tier_1_unit_count
+         FROM rate_plans
+         WHERE client_id = $1
+         ORDER BY effective_start DESC LIMIT 1`,
+        [client_id]
+      );
+    }
 
     if (rateRes.rows.length > 0) {
       const rp = rateRes.rows[0];

@@ -335,7 +335,7 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
   const [parsing, setParsing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [parsedRows, setParsedRows] = useState<any[]>([]);
-  const [preview, setPreview] = useState<{ total: number; active: number; auto_excluded: number; review_flagged: number; merchants: { name: string; terminals: number }[]; flaggedItems: any[] } | null>(null);
+  const [preview, setPreview] = useState<{ total: number; active: number; auto_excluded: number; review_flagged: number; merchants: { name: string; terminals: number; purchaseAmt: number; refundAmt: number; excluded: number }[]; flaggedItems: any[] } | null>(null);
   const [importResult, setImportResult] = useState<any>(null);
   const [showFlagged, setShowFlagged] = useState(false);
 
@@ -408,23 +408,38 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
         });
       }
 
-      // Client-side test-filter preview (simplified)
+      // Client-side test-filter preview (matches server-side test-filter.ts)
       let autoExcluded = 0;
       let reviewFlagged = 0;
       const flaggedItems: any[] = [];
       for (const r of rows) {
         const amt = parseFloat(String(r.purchase_amount).replace(/[(),]/g, "")) || 0;
         const recv = parseFloat(String(r.merchant_receivable).replace(/[(),]/g, "")) || 0;
-        if (recv === 0 && amt <= 1) autoExcluded++;
+        // Tier 1a: zero receivable + low amount
+        if (recv === 0 && amt <= 1) { autoExcluded++; r._flag = "auto_excluded"; }
+        // Tier 1b: penny transactions (purchase under $1 regardless of receivable)
+        else if (amt < 1) { autoExcluded++; r._flag = "auto_excluded"; }
+        // Tier 2: full refund at higher amounts
         else if (recv === 0 && amt > 1) {
           reviewFlagged++;
+          r._flag = "review";
           flaggedItems.push(r);
         }
       }
 
-      const merchants = Object.entries(merchantMap)
-        .map(([name, terminals]) => ({ name, terminals }))
-        .sort((a, b) => b.terminals - a.terminals);
+      // Build detailed merchant data with amounts
+      const merchantDetail: Record<string, { terminals: number; purchaseAmt: number; refundAmt: number; excluded: number }> = {};
+      for (const r of rows) {
+        const store = r.store_name || "Unknown";
+        if (!merchantDetail[store]) merchantDetail[store] = { terminals: 0, purchaseAmt: 0, refundAmt: 0, excluded: 0 };
+        merchantDetail[store].terminals++;
+        merchantDetail[store].purchaseAmt += parseFloat(String(r.purchase_amount).replace(/[(),]/g, "")) || 0;
+        merchantDetail[store].refundAmt += Math.abs(parseFloat(String(r.refund_amount).replace(/[(),]/g, "")) || 0);
+        if (r._flag === "auto_excluded") merchantDetail[store].excluded++;
+      }
+      const merchants = Object.entries(merchantDetail)
+        .map(([name, d]) => ({ name, terminals: d.terminals, purchaseAmt: d.purchaseAmt, refundAmt: d.refundAmt, excluded: d.excluded }))
+        .sort((a, b) => b.purchaseAmt - a.purchaseAmt);
 
       setParsedRows(rows);
       setPreview({
@@ -575,16 +590,57 @@ function ImportModal({ clientId, clientName, onClose }: { clientId: number; clie
                 </div>
               )}
 
-              {/* Merchant breakdown */}
+              {/* Merchant breakdown with detail */}
               <div>
                 <h3 className="text-sm font-medium text-slate-700 mb-2">Merchants in this export ({preview.merchants.length})</h3>
-                <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
-                  {preview.merchants.map((m) => (
-                    <div key={m.name} className="flex justify-between px-3 py-2 text-sm">
-                      <span className="text-slate-700">{m.name}</span>
-                      <span className="text-slate-500 font-mono">{m.terminals} terminal{m.terminals > 1 ? "s" : ""}</span>
-                    </div>
-                  ))}
+                <div className="max-h-56 overflow-y-auto border rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left text-xs font-medium text-slate-500">Merchant</th>
+                        <th className="px-2 py-1.5 text-center text-xs font-medium text-slate-500">Terms</th>
+                        <th className="px-2 py-1.5 text-right text-xs font-medium text-slate-500">Purchases</th>
+                        <th className="px-2 py-1.5 text-right text-xs font-medium text-slate-500">Refunds</th>
+                        <th className="px-2 py-1.5 text-center text-xs font-medium text-slate-500">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {preview.merchants.map((m) => (
+                        <tr key={m.name} className={m.excluded === m.terminals ? "bg-red-50/50 opacity-60" : ""}>
+                          <td className="px-3 py-1.5 text-slate-700 max-w-[180px] truncate" title={m.name}>{m.name}</td>
+                          <td className="px-2 py-1.5 text-center font-mono text-xs">{m.terminals}</td>
+                          <td className="px-2 py-1.5 text-right font-mono text-xs">${m.purchaseAmt.toFixed(2)}</td>
+                          <td className="px-2 py-1.5 text-right font-mono text-xs">${m.refundAmt.toFixed(2)}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            {m.excluded === m.terminals ? (
+                              <span className="text-[10px] text-red-500 font-medium">Excluded</span>
+                            ) : (
+                              <button
+                                className="text-[10px] px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                onClick={() => {
+                                  // Remove all terminals for this merchant from parsedRows
+                                  setParsedRows((prev) => prev.filter((r) => r.store_name !== m.name));
+                                  // Update preview counts
+                                  const removedActive = m.terminals - m.excluded;
+                                  setPreview((prev) => prev ? {
+                                    ...prev,
+                                    total: prev.total - m.terminals,
+                                    active: prev.active - removedActive,
+                                    auto_excluded: prev.auto_excluded - m.excluded,
+                                    merchants: prev.merchants.map((pm) =>
+                                      pm.name === m.name ? { ...pm, excluded: pm.terminals } : pm
+                                    ),
+                                  } : prev);
+                                }}
+                              >
+                                Exclude
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 

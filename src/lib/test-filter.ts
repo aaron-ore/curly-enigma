@@ -26,7 +26,8 @@ export interface FilterResult {
 /**
  * Apply the tiered test-transaction filter per spec section 3b.
  * 
- * Tier 1 — auto-exclude: merchant_receivable = $0.00 AND purchase_amount <= $1.00
+ * Tier 1a — auto-exclude: merchant_receivable = $0.00 AND purchase_amount <= $1.00
+ * Tier 1b — auto-exclude: purchase_amount < $1.00 (penny transactions, regardless of receivable)
  * Tier 2 — flag for review: merchant_receivable = $0.00 AND refund_qty = purchase_qty AND purchase_amount > $1.00
  * Everything else: counts as active
  */
@@ -34,12 +35,21 @@ export function applyTestFilter(row: PayPilotRow): FilterResult {
   const receivable = Math.abs(row.merchant_receivable);
   const purchaseAmt = row.purchase_amount;
   
-  // Tier 1: auto-exclude (high confidence test transaction)
+  // Tier 1a: auto-exclude (zero receivable + low amount)
   if (receivable === 0 && purchaseAmt <= 1.0) {
     return {
       test_flag: "auto_excluded",
       included_in_active_count: false,
-      reason: `Auto-excluded: $${purchaseAmt.toFixed(2)} purchase fully refunded, merchant receivable $0.00`,
+      reason: `Auto-excluded: $${purchaseAmt.toFixed(2)} purchase, merchant receivable $0.00`,
+    };
+  }
+
+  // Tier 1b: auto-exclude (penny transactions — purchase under $1 regardless of receivable)
+  if (purchaseAmt < 1.0) {
+    return {
+      test_flag: "auto_excluded",
+      included_in_active_count: false,
+      reason: `Auto-excluded: penny transaction ($${purchaseAmt.toFixed(2)} total purchases)`,
     };
   }
 
