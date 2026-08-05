@@ -141,7 +141,7 @@ export async function PUT(request: NextRequest) {
 
     // Handle manual override of calculated_total and/or active_units
     if (override_total !== undefined || override_units !== undefined) {
-      const existing = await query(`SELECT client_id, billing_month, calculated_total FROM charges WHERE id = $1`, [id]);
+      const existing = await query(`SELECT client_id, billing_month FROM charges WHERE id = $1`, [id]);
       if (existing.rows.length === 0) {
         return NextResponse.json({ error: "Charge not found" }, { status: 404 });
       }
@@ -150,21 +150,21 @@ export async function PUT(request: NextRequest) {
       if (override_total !== undefined) {
         // Update charge calculated_total
         await query(
-          `UPDATE charges SET calculated_total = $2, notes = COALESCE($3, notes), updated_at = NOW() WHERE id = $1`,
-          [id, override_total, notes || "Manual override"]
+          `UPDATE charges SET calculated_total = $1, notes = COALESCE($2, notes), updated_at = NOW() WHERE id = $3`,
+          [override_total, notes || "Manual override", id]
         );
         // Update usage_record calculated_total
         await query(
-          `UPDATE usage_records SET calculated_total = $2, source = 'imported_overridden', updated_at = NOW()
-           WHERE client_id = $3 AND billing_month = $4`,
-          [override_total, override_total, client_id, billing_month]
+          `UPDATE usage_records SET calculated_total = $1, source = 'imported_overridden', updated_at = NOW()
+           WHERE client_id = $2 AND billing_month = $3::date`,
+          [override_total, client_id, billing_month]
         );
       }
 
       if (override_units !== undefined) {
         await query(
           `UPDATE usage_records SET active_units = $1, source = 'imported_overridden', updated_at = NOW()
-           WHERE client_id = $2 AND billing_month = $3`,
+           WHERE client_id = $2 AND billing_month = $3::date`,
           [override_units, client_id, billing_month]
         );
       }

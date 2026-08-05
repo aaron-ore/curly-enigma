@@ -901,18 +901,26 @@ function BillingHistoryTable({ history, onRefresh }: { history: any[]; onRefresh
   };
 
   const handleOverride = async (h: any) => {
-    if (!h.charge_id) return;
+    if (!h.charge_id) { alert("No charge record found for this entry"); return; }
     setSaving(true);
-    await fetch("/api/charges", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: h.charge_id,
-        override_total: parseFloat(editTotal),
-        override_units: parseInt(editUnits),
-        notes: "Manual override",
-      }),
-    });
+    try {
+      const res = await fetch("/api/charges", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: h.charge_id,
+          override_total: parseFloat(editTotal),
+          override_units: parseInt(editUnits),
+          notes: "Manual override",
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        alert("Override failed: " + (result.detail || result.error || "Unknown error"));
+      }
+    } catch (err: any) {
+      alert("Override failed: " + err.message);
+    }
     setSaving(false);
     setExpandedIdx(null);
     onRefresh();
