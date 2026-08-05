@@ -186,6 +186,48 @@ export async function POST(request: NextRequest) {
       else active++;
     }
 
+    // --- Step 5: Create/update usage_record for this client + month ---
+    // Calculate the billing total using the client's rate plan
+    let calculatedTotal = 0;
+    if (rateRes.rows.length > 0) {
+      const rp = rateRes.rows[0];
+      const flatRate = parseFloat(rp.flat_rate || "0");
+      const tier1Rate = parseFloat(rp.tier_1_rate || "0");
+      const tier2Rate = parseFloat(rp.tier_2_rate || "0");
+      const tier1Count = parseInt(rp.tier_1_unit_count || "0");
+      const capAmount = parseFloat(rp.cap_amount || "0");
+
+      if (flatRate > 0) {
+        calculatedTotal = active * flatRate;
+      } else if (tier1Rate > 0) {
+        const t1 = Math.min(active, tier1Count || 1);
+        const t2 = Math.max(0, active - t1);
+        calculatedTotal = t1 * tier1Rate + t2 * tier2Rate;
+      }
+
+      if (capAmount > 0 && calculatedTotal > capAmount) {
+        calculatedTotal = capAmount;
+      }
+    }
+
+    // Upsert usage_record
+    await query(
+      `INSERT INTO usage_records (client_id, billing_month, active_units, source, source_import_id, calculated_total)
+       VALUES ($1, $2, $3, 'imported', $4, $5)
+       ON CONFLICT (client_id, billing_month)
+       DO UPDATE SET active_units = $3, source = 'imported', source_import_id = $4, calculated_total = $5, updated_at = NOW()`,
+      [client_id, billing_month, active, importId, calculatedTotal]
+    );
+
+    // Upsert charge record (pending)
+    await query(
+      `INSERT INTO charges (client_id, billing_month, calculated_total, status)
+       VALUES ($1, $2, $3, 'pending')
+       ON CONFLICT (client_id, billing_month)
+       DO UPDATE SET calculated_total = $3, updated_at = NOW()`,
+      [client_id, billing_month, calculatedTotal]
+    );
+
     return NextResponse.json({
       import_id: importId,
       client_id,
@@ -194,6 +236,7 @@ export async function POST(request: NextRequest) {
       auto_excluded: autoExcluded,
       review_flagged: reviewFlagged,
       review_cap: reviewCap,
+      calculated_total: calculatedTotal,
     });
   } catch (error: any) {
     return NextResponse.json(
