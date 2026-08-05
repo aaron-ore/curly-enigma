@@ -18,6 +18,27 @@ interface ClientDetail {
   children: any[];
 }
 
+interface ParsedTransaction {
+  store_name: string;
+  terminal_sn: string;
+  purchase_qty: number;
+  purchase_amount: string;
+  refund_qty: number;
+  refund_amount: string;
+  merchant_receivable: string;
+  test_flag: string | null;
+}
+
+interface ImportPreview {
+  rows: any[];
+  total: number;
+  active: number;
+  auto_excluded: number;
+  review_flagged: number;
+  review_cap: number;
+  merchants: { name: string; terminals: number }[];
+}
+
 export default function ClientDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -27,6 +48,7 @@ export default function ClientDetailPage() {
   const [showRateForm, setShowRateForm] = useState(false);
   const [deletingRateId, setDeletingRateId] = useState<number | null>(null);
   const [editingRateId, setEditingRateId] = useState<number | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const fetchClient = () => {
     fetch(`/api/clients/${params.id}`)
@@ -55,9 +77,14 @@ export default function ClientDetailPage() {
             <span className="badge bg-slate-100 text-slate-600 capitalize">{client.payment_method}</span>
           </div>
         </div>
-        <button className="btn-secondary" onClick={() => setEditing(!editing)}>
-          {editing ? "Cancel Edit" : "Edit Client"}
-        </button>
+        <div className="flex gap-2">
+          <button className="btn-primary" onClick={() => setShowImportModal(true)}>
+            Import PayPilot
+          </button>
+          <button className="btn-secondary" onClick={() => setEditing(!editing)}>
+            {editing ? "Cancel Edit" : "Edit Client"}
+          </button>
+        </div>
       </div>
 
       {/* Edit Form */}
@@ -71,7 +98,7 @@ export default function ClientDetailPage() {
             <Link href={`/clients/${client.parent_client_id}`} className="text-[#0066FF] hover:underline">
               {client.parent_name}
             </Link>
-            {" "}— this client is never billed directly.
+            {" "}&mdash; this client is never billed directly.
           </p>
         </div>
       )}
@@ -137,8 +164,8 @@ export default function ClientDetailPage() {
                       ? `$${Number(rp.flat_rate).toFixed(2)}/unit`
                       : `$${Number(rp.tier_1_rate).toFixed(2)} x${rp.tier_1_unit_count}, then $${Number(rp.tier_2_rate).toFixed(2)}`}
                   </td>
-                  <td className="text-sm">{rp.cap_amount ? `$${Number(rp.cap_amount).toFixed(2)}/${rp.cap_scope || "client"}` : "—"}</td>
-                  <td className="text-sm text-slate-500">{rp.notes || "—"}</td>
+                  <td className="text-sm">{rp.cap_amount ? `$${Number(rp.cap_amount).toFixed(2)}/${rp.cap_scope || "client"}` : "\u2014"}</td>
+                  <td className="text-sm text-slate-500">{rp.notes || "\u2014"}</td>
                   <td>
                     <div className="flex gap-1">
                       <button
@@ -216,8 +243,8 @@ export default function ClientDetailPage() {
                   <td className="text-sm font-medium">{h.active_units}</td>
                   <td><span className="badge bg-slate-100 text-slate-600 text-xs">{h.source}</span></td>
                   <td className="text-sm">${Number(h.calculated_total).toFixed(2)}</td>
-                  <td className="text-sm">{h.amount_charged ? `$${Number(h.amount_charged).toFixed(2)}` : "—"}</td>
-                  <td className="text-sm text-slate-500">{h.date_charged ? fmtDate(h.date_charged) : "—"}</td>
+                  <td className="text-sm">{h.amount_charged ? `$${Number(h.amount_charged).toFixed(2)}` : "\u2014"}</td>
+                  <td className="text-sm text-slate-500">{h.date_charged ? fmtDate(h.date_charged) : "\u2014"}</td>
                   <td>{h.status && <span className={`badge status-${h.status}`}>{h.status}</span>}</td>
                   <td>
                     {h.charge_id && h.status === "pending" && (
@@ -268,9 +295,282 @@ export default function ClientDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <ImportModal
+          clientId={client.id}
+          clientName={client.name}
+          onClose={() => { setShowImportModal(false); fetchClient(); }}
+        />
+      )}
     </div>
   );
 }
+
+/* ======================== IMPORT MODAL ======================== */
+
+function ImportModal({ clientId, clientName, onClose }: { clientId: number; clientName: string; onClose: () => void }) {
+  const [billingMonth, setBillingMonth] = useState(() => {
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return prev.toISOString().split("T")[0];
+  });
+  const [file, setFile] = useState<File | null>(null);
+  const [step, setStep] = useState<"upload" | "preview" | "done">("upload");
+  const [parsing, setParsing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [parsedRows, setParsedRows] = useState<any[]>([]);
+  const [preview, setPreview] = useState<{ total: number; active: number; auto_excluded: number; review_flagged: number; merchants: { name: string; terminals: number }[] } | null>(null);
+  const [importResult, setImportResult] = useState<any>(null);
+
+  const handleParse = async () => {
+    if (!file) return;
+    setParsing(true);
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+      let headerIdx = -1;
+      for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+        const row = rawRows[i];
+        if (!row || !Array.isArray(row)) continue;
+        const rowStrs = row.map((cell: any) => String(cell ?? ""));
+        if (rowStrs.some((s: string) => s.includes("Store")) &&
+            rowStrs.some((s: string) => s.includes("Terminal SN"))) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      if (headerIdx === -1) {
+        alert("Could not find header row with 'Store' and 'Terminal SN' columns");
+        setParsing(false);
+        return;
+      }
+
+      const rawHeader = rawRows[headerIdx];
+      const headers: string[] = [];
+      for (let c = 0; c < rawHeader.length; c++) {
+        headers.push(String(rawHeader[c] ?? "").trim());
+      }
+
+      const storeIdx = headers.findIndex((h) => h === "Store");
+      const storeTypeIdx = headers.findIndex((h) => h === "Store Type");
+      const terminalIdx = headers.findIndex((h) => h === "Terminal SN");
+      const purchaseIdx = headers.findIndex((h) => h === "Purchase");
+      const purchaseAmtIdx = headers.findIndex((h) => h === "Purchase Amount");
+      const refundIdx = headers.findIndex((h) => h === "Refund");
+      const refundAmtIdx = headers.findIndex((h) => h === "Refund Amount");
+      const discountIdx = headers.findIndex((h) => h === "Discount");
+      const feeIdx = headers.findIndex((h) => h === "Fee");
+      const vatIdx = headers.findIndex((h) => h === "VAT");
+      const receivableIdx = headers.findIndex((h) => h.includes("Merchant Receivable"));
+
+      const rows: any[] = [];
+      const merchantMap: Record<string, number> = {};
+
+      for (let i = headerIdx + 1; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (!row || !row[terminalIdx]) continue;
+        const storeName = row[storeIdx] || "Unknown";
+        merchantMap[storeName] = (merchantMap[storeName] || 0) + 1;
+        rows.push({
+          store_name: storeName,
+          store_type: row[storeTypeIdx] || "",
+          terminal_sn: String(row[terminalIdx]),
+          purchase_qty: row[purchaseIdx] || 0,
+          purchase_amount: row[purchaseAmtIdx] || "0",
+          refund_qty: row[refundIdx] || 0,
+          refund_amount: row[refundAmtIdx] || "0",
+          discount: row[discountIdx] || "0",
+          fee: row[feeIdx] || "0",
+          vat: row[vatIdx] || "0",
+          merchant_receivable: row[receivableIdx] || "0",
+        });
+      }
+
+      // Client-side test-filter preview (simplified)
+      let autoExcluded = 0;
+      let reviewFlagged = 0;
+      for (const r of rows) {
+        const amt = parseFloat(String(r.purchase_amount).replace(/[(),]/g, "")) || 0;
+        const recv = parseFloat(String(r.merchant_receivable).replace(/[(),]/g, "")) || 0;
+        if (recv === 0 && amt <= 1) autoExcluded++;
+        else if (recv === 0 && amt > 1) reviewFlagged++;
+      }
+
+      const merchants = Object.entries(merchantMap)
+        .map(([name, terminals]) => ({ name, terminals }))
+        .sort((a, b) => b.terminals - a.terminals);
+
+      setParsedRows(rows);
+      setPreview({
+        total: rows.length,
+        active: rows.length - autoExcluded - reviewFlagged,
+        auto_excluded: autoExcluded,
+        review_flagged: reviewFlagged,
+        merchants,
+      });
+      setStep("preview");
+    } catch (err: any) {
+      alert("Parse failed: " + err.message);
+    }
+    setParsing(false);
+  };
+
+  const handleConfirmImport = async () => {
+    setConfirming(true);
+    try {
+      const res = await fetch("/api/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          billing_month: billingMonth,
+          imported_by: "operator",
+          source_file_name: file?.name || "upload",
+          rows: parsedRows,
+        }),
+      });
+      const result = await res.json();
+      if (result.error) {
+        alert("Import failed: " + (result.detail || result.error));
+      } else {
+        setImportResult(result);
+        setStep("done");
+      }
+    } catch (err: any) {
+      alert("Import failed: " + err.message);
+    }
+    setConfirming(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto mx-4">
+        {/* Modal Header */}
+        <div className="sticky top-0 bg-white border-b px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Import PayPilot Export</h2>
+            <p className="text-sm text-slate-500">Client: {clientName}</p>
+          </div>
+          <button className="text-slate-400 hover:text-slate-600 text-xl leading-none" onClick={onClose}>&times;</button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Step 1: Upload */}
+          {step === "upload" && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Billing Month</label>
+                  <input type="date" className="input-field" value={billingMonth} onChange={(e) => setBillingMonth(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">PayPilot Export (.xlsx)</label>
+                  <input type="file" accept=".xlsx,.xls,.csv" className="input-field" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                </div>
+              </div>
+              <button className="btn-primary w-full" onClick={handleParse} disabled={!file || parsing}>
+                {parsing ? "Parsing..." : "Parse & Preview"}
+              </button>
+            </>
+          )}
+
+          {/* Step 2: Preview */}
+          {step === "preview" && preview && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="text-center p-3 bg-slate-50 rounded-lg">
+                  <p className="text-xl font-bold text-slate-900">{preview.total}</p>
+                  <p className="text-xs text-slate-500">Total Terminals</p>
+                </div>
+                <div className="text-center p-3 bg-green-50 rounded-lg">
+                  <p className="text-xl font-bold text-green-600">{preview.active}</p>
+                  <p className="text-xs text-slate-500">Active</p>
+                </div>
+                <div className="text-center p-3 bg-slate-50 rounded-lg">
+                  <p className="text-xl font-bold text-slate-400">{preview.auto_excluded}</p>
+                  <p className="text-xs text-slate-500">Auto-Excluded</p>
+                </div>
+                <div className="text-center p-3 bg-amber-50 rounded-lg">
+                  <p className="text-xl font-bold text-amber-500">{preview.review_flagged}</p>
+                  <p className="text-xs text-slate-500">Needs Review</p>
+                </div>
+              </div>
+
+              {/* Merchant breakdown */}
+              <div>
+                <h3 className="text-sm font-medium text-slate-700 mb-2">Merchants in this export ({preview.merchants.length})</h3>
+                <div className="max-h-40 overflow-y-auto border rounded-lg divide-y">
+                  {preview.merchants.map((m) => (
+                    <div key={m.name} className="flex justify-between px-3 py-2 text-sm">
+                      <span className="text-slate-700">{m.name}</span>
+                      <span className="text-slate-500 font-mono">{m.terminals} terminal{m.terminals > 1 ? "s" : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <p className="text-sm text-blue-800">
+                  <strong>{preview.active} active terminals</strong> will be saved for <strong>{clientName}</strong> for billing month <strong>{billingMonth}</strong>.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button className="btn-secondary flex-1" onClick={() => { setStep("upload"); setPreview(null); setParsedRows([]); }}>
+                  Back
+                </button>
+                <button className="btn-primary flex-1" onClick={handleConfirmImport} disabled={confirming}>
+                  {confirming ? "Saving..." : "Confirm & Save Import"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Step 3: Done */}
+          {step === "done" && importResult && (
+            <>
+              <div className="text-center py-4">
+                <div className="text-4xl mb-2">&#10003;</div>
+                <h3 className="text-lg font-semibold text-slate-900">Import Saved Successfully</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  {importResult.active} active terminals recorded for {clientName}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+                <div className="p-2 bg-slate-50 rounded">
+                  <p className="font-bold">{importResult.total}</p>
+                  <p className="text-xs text-slate-500">Total</p>
+                </div>
+                <div className="p-2 bg-green-50 rounded">
+                  <p className="font-bold text-green-600">{importResult.active}</p>
+                  <p className="text-xs text-slate-500">Active</p>
+                </div>
+                <div className="p-2 bg-slate-50 rounded">
+                  <p className="font-bold text-slate-400">{importResult.auto_excluded}</p>
+                  <p className="text-xs text-slate-500">Excluded</p>
+                </div>
+                <div className="p-2 bg-amber-50 rounded">
+                  <p className="font-bold text-amber-500">{importResult.review_flagged}</p>
+                  <p className="text-xs text-slate-500">Flagged</p>
+                </div>
+              </div>
+              <button className="btn-primary w-full" onClick={onClose}>Done</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ======================== EDIT CLIENT FORM ======================== */
 
 function EditClientForm({ client, onSaved }: { client: ClientDetail; onSaved: () => void }) {
   const router = useRouter();
@@ -338,6 +638,8 @@ function EditClientForm({ client, onSaved }: { client: ClientDetail; onSaved: ()
     </form>
   );
 }
+
+/* ======================== ADD RATE PLAN FORM ======================== */
 
 function AddRatePlanForm({ clientId, onCreated }: { clientId: number; onCreated: () => void }) {
   const [form, setForm] = useState({
@@ -430,6 +732,108 @@ function AddRatePlanForm({ clientId, onCreated }: { clientId: number; onCreated:
   );
 }
 
+/* ======================== EDIT RATE PLAN FORM ======================== */
+
+function EditRatePlanForm({ ratePlan, onSaved, onCancel }: { ratePlan: any; onSaved: () => void; onCancel: () => void }) {
+  const [form, setForm] = useState({
+    pricing_model: ratePlan.pricing_model,
+    effective_start: ratePlan.effective_start?.split("T")[0] || "",
+    effective_end: ratePlan.effective_end?.split("T")[0] || "",
+    flat_rate: ratePlan.flat_rate || "",
+    tier_1_rate: ratePlan.tier_1_rate || "",
+    tier_1_unit_count: ratePlan.tier_1_unit_count || "",
+    tier_2_rate: ratePlan.tier_2_rate || "",
+    cap_amount: ratePlan.cap_amount || "",
+    cap_scope: ratePlan.cap_scope || "",
+    notes: ratePlan.notes || "",
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await fetch("/api/rate-plans", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: ratePlan.id,
+        pricing_model: form.pricing_model,
+        effective_start: form.effective_start,
+        effective_end: form.effective_end || null,
+        flat_rate: form.flat_rate ? parseFloat(form.flat_rate) : null,
+        tier_1_rate: form.tier_1_rate ? parseFloat(form.tier_1_rate) : null,
+        tier_1_unit_count: form.tier_1_unit_count ? parseInt(form.tier_1_unit_count) : null,
+        tier_2_rate: form.tier_2_rate ? parseFloat(form.tier_2_rate) : null,
+        cap_amount: form.cap_amount ? parseFloat(form.cap_amount) : null,
+        cap_scope: form.cap_scope || null,
+        notes: form.notes || null,
+      }),
+    });
+    onSaved();
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-amber-50/50 p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Model</label>
+        <select className="input-field text-sm" value={form.pricing_model} onChange={(e) => setForm({ ...form, pricing_model: e.target.value })}>
+          <option value="flat_per_unit">Flat Per Unit</option>
+          <option value="tiered_per_unit">Tiered Per Unit</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Start</label>
+        <input type="date" className="input-field text-sm" value={form.effective_start} onChange={(e) => setForm({ ...form, effective_start: e.target.value })} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">End (optional)</label>
+        <input type="date" className="input-field text-sm" value={form.effective_end} onChange={(e) => setForm({ ...form, effective_end: e.target.value })} />
+      </div>
+      {form.pricing_model === "flat_per_unit" ? (
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">Flat Rate ($)</label>
+          <input type="number" step="0.01" className="input-field text-sm" value={form.flat_rate} onChange={(e) => setForm({ ...form, flat_rate: e.target.value })} />
+        </div>
+      ) : (
+        <>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">T1 Rate</label>
+            <input type="number" step="0.01" className="input-field text-sm" value={form.tier_1_rate} onChange={(e) => setForm({ ...form, tier_1_rate: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">T1 Units</label>
+            <input type="number" className="input-field text-sm" value={form.tier_1_unit_count} onChange={(e) => setForm({ ...form, tier_1_unit_count: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">T2 Rate</label>
+            <input type="number" step="0.01" className="input-field text-sm" value={form.tier_2_rate} onChange={(e) => setForm({ ...form, tier_2_rate: e.target.value })} />
+          </div>
+        </>
+      )}
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Cap ($)</label>
+        <input type="number" step="0.01" className="input-field text-sm" value={form.cap_amount} onChange={(e) => setForm({ ...form, cap_amount: e.target.value })} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Cap Scope</label>
+        <select className="input-field text-sm" value={form.cap_scope} onChange={(e) => setForm({ ...form, cap_scope: e.target.value })}>
+          <option value="">None</option>
+          <option value="per_client">Per Client</option>
+          <option value="per_location">Per Location</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+        <input className="input-field text-sm" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+      </div>
+      <div className="flex items-end gap-2">
+        <button type="submit" className="btn-primary text-sm">Save</button>
+        <button type="button" className="btn-secondary text-sm" onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+/* ======================== HELPERS ======================== */
+
 function formatMonth(dateStr: string): string {
   if (!dateStr) return "";
   const d = new Date(dateStr);
@@ -439,7 +843,6 @@ function formatMonth(dateStr: string): string {
 /** Format date as MM-DD-YYYY, stripping any time/timezone */
 function fmtDate(dateStr: string): string {
   if (!dateStr) return "";
-  // Handle ISO strings like "2026-01-14T00:00:00.000Z"
   const raw = dateStr.split("T")[0];
   const [y, m, d] = raw.split("-");
   if (!y || !m || !d) return raw;

@@ -7,7 +7,6 @@ import Image from "next/image";
 const navItems = [
   { href: "/", label: "Dashboard" },
   { href: "/clients", label: "Clients" },
-  { href: "/import", label: "Import" },
   { href: "/billing-run", label: "Billing Run" },
   { href: "/charges", label: "Charges" },
   { href: "/export", label: "Export" },
