@@ -223,90 +223,7 @@ export default function ClientDetailPage() {
         {client.history.length === 0 ? (
           <p className="text-sm text-slate-500">No billing history yet.</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Month</th>
-                <th>Units</th>
-                <th>Source</th>
-                <th>Calculated</th>
-                <th>Charged</th>
-                <th>Date Charged</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {client.history.map((h: any, i: number) => (
-                <tr key={i}>
-                  <td className="text-sm">{formatMonth(h.billing_month)}</td>
-                  <td className="text-sm font-medium">{h.active_units}</td>
-                  <td><span className="badge bg-slate-100 text-slate-600 text-xs">{h.source}</span></td>
-                  <td className="text-sm">${Number(h.calculated_total).toFixed(2)}</td>
-                  <td className="text-sm">{h.amount_charged ? `$${Number(h.amount_charged).toFixed(2)}` : "\u2014"}</td>
-                  <td className="text-sm text-slate-500">{h.date_charged ? fmtDate(h.date_charged) : "\u2014"}</td>
-                  <td>{h.status && <span className={`badge status-${h.status}`}>{h.status}</span>}</td>
-                  <td>
-                    <div className="flex gap-1 items-center flex-wrap">
-                      {h.charge_id && h.status === "pending" && (
-                        <button
-                          className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-medium"
-                          onClick={async () => {
-                            await fetch("/api/charges", {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                id: h.charge_id, status: "charged",
-                                amount_charged: h.calculated_total,
-                                date_charged: new Date().toISOString().split("T")[0],
-                              }),
-                            });
-                            fetchClient();
-                          }}
-                        >
-                          Mark Charged
-                        </button>
-                      )}
-                      {h.charge_id && h.status === "charged" && (
-                        <button
-                          className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 font-medium"
-                          onClick={async () => {
-                            await fetch("/api/charges", {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                id: h.charge_id, status: "paid",
-                                amount_received: h.amount_charged || h.calculated_total,
-                                date_received: new Date().toISOString().split("T")[0],
-                              }),
-                            });
-                            fetchClient();
-                          }}
-                        >
-                          Mark Paid
-                        </button>
-                      )}
-                      {h.charge_id && h.status === "paid" && (
-                        <span className="text-[10px] text-emerald-600 font-medium">Paid</span>
-                      )}
-                      {h.charge_id && (
-                        <button
-                          className="text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100"
-                          onClick={async () => {
-                            if (!confirm(`Delete billing for ${formatMonth(h.billing_month)}? This removes the charge and usage record.`)) return;
-                            await fetch(`/api/charges?id=${h.charge_id}`, { method: "DELETE" });
-                            fetchClient();
-                          }}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <BillingHistoryTable history={client.history} onRefresh={fetchClient} />
         )}
       </div>
 
@@ -962,6 +879,174 @@ function EditRatePlanForm({ ratePlan, onSaved, onCancel }: { ratePlan: any; onSa
         <button type="button" className="btn-secondary text-sm" onClick={onCancel}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+/* ======================== BILLING HISTORY TABLE ======================== */
+
+function BillingHistoryTable({ history, onRefresh }: { history: any[]; onRefresh: () => void }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [editUnits, setEditUnits] = useState("");
+  const [editTotal, setEditTotal] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const toggleExpand = (idx: number, h: any) => {
+    if (expandedIdx === idx) {
+      setExpandedIdx(null);
+    } else {
+      setExpandedIdx(idx);
+      setEditUnits(String(h.active_units || 0));
+      setEditTotal(String(Number(h.calculated_total || 0).toFixed(2)));
+    }
+  };
+
+  const handleOverride = async (h: any) => {
+    if (!h.charge_id) return;
+    setSaving(true);
+    await fetch("/api/charges", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: h.charge_id,
+        override_total: parseFloat(editTotal),
+        override_units: parseInt(editUnits),
+        notes: "Manual override",
+      }),
+    });
+    setSaving(false);
+    setExpandedIdx(null);
+    onRefresh();
+  };
+
+  const handleStatusChange = async (h: any, newStatus: string) => {
+    if (!h.charge_id) return;
+    const payload: any = { id: h.charge_id, status: newStatus };
+    if (newStatus === "charged") {
+      payload.amount_charged = h.calculated_total;
+      payload.date_charged = new Date().toISOString().split("T")[0];
+    }
+    if (newStatus === "paid") {
+      payload.amount_received = h.amount_charged || h.calculated_total;
+      payload.date_received = new Date().toISOString().split("T")[0];
+    }
+    await fetch("/api/charges", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    onRefresh();
+  };
+
+  const handleDelete = async (h: any) => {
+    if (!h.charge_id) return;
+    if (!confirm(`Delete billing for ${formatMonth(h.billing_month)}? This removes the charge and usage record.`)) return;
+    await fetch(`/api/charges?id=${h.charge_id}`, { method: "DELETE" });
+    onRefresh();
+  };
+
+  return (
+    <div className="space-y-2">
+      {/* Header row */}
+      <div className="grid grid-cols-12 gap-2 px-3 py-2 text-xs font-medium text-slate-500 uppercase border-b">
+        <div className="col-span-2">Month</div>
+        <div className="col-span-1">Units</div>
+        <div className="col-span-1">Source</div>
+        <div className="col-span-2">Calculated</div>
+        <div className="col-span-2">Charged</div>
+        <div className="col-span-1">Status</div>
+        <div className="col-span-3">Actions</div>
+      </div>
+
+      {history.map((h: any, i: number) => (
+        <div key={i} className="border rounded-lg overflow-hidden">
+          {/* Summary row — clickable to expand */}
+          <div
+            className={`grid grid-cols-12 gap-2 px-3 py-2.5 items-center cursor-pointer hover:bg-slate-50 transition-colors ${expandedIdx === i ? "bg-blue-50/50 border-b" : ""}`}
+            onClick={() => toggleExpand(i, h)}
+          >
+            <div className="col-span-2 text-sm font-medium text-slate-900">
+              <span className="mr-1 text-slate-400 text-xs">{expandedIdx === i ? "\u25BC" : "\u25B6"}</span>
+              {formatMonth(h.billing_month)}
+            </div>
+            <div className="col-span-1 text-sm font-semibold">{h.active_units}</div>
+            <div className="col-span-1">
+              <span className={`badge text-xs ${h.source === "imported_overridden" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
+                {h.source === "imported_overridden" ? "override" : h.source}
+              </span>
+            </div>
+            <div className="col-span-2 text-sm font-semibold text-slate-900">${Number(h.calculated_total).toFixed(2)}</div>
+            <div className="col-span-2 text-sm text-slate-600">
+              {h.amount_charged ? `$${Number(h.amount_charged).toFixed(2)}` : "\u2014"}
+              {h.date_charged && <span className="text-xs text-slate-400 ml-1">({fmtDate(h.date_charged)})</span>}
+            </div>
+            <div className="col-span-1">
+              {h.status && <span className={`badge status-${h.status} text-xs`}>{h.status}</span>}
+            </div>
+            <div className="col-span-3 flex gap-1 items-center flex-wrap" onClick={(e) => e.stopPropagation()}>
+              {h.charge_id && h.status === "pending" && (
+                <button className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 font-medium" onClick={() => handleStatusChange(h, "charged")}>
+                  Charged
+                </button>
+              )}
+              {h.charge_id && h.status === "charged" && (
+                <button className="text-[10px] px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 font-medium" onClick={() => handleStatusChange(h, "paid")}>
+                  Paid
+                </button>
+              )}
+              {h.charge_id && h.status === "paid" && (
+                <span className="text-[10px] text-emerald-600 font-medium">\u2713 Paid</span>
+              )}
+              {h.charge_id && (
+                <button className="text-[10px] px-2 py-0.5 bg-red-50 text-red-600 rounded hover:bg-red-100" onClick={() => handleDelete(h)}>
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Expanded: Edit section */}
+          {expandedIdx === i && (
+            <div className="px-4 py-3 bg-slate-50/80 space-y-3">
+              <p className="text-xs text-slate-500 font-medium uppercase">Manual Override</p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Active Units</label>
+                  <input
+                    type="number"
+                    className="input-field text-sm"
+                    value={editUnits}
+                    onChange={(e) => setEditUnits(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1">Calculated Total ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input-field text-sm"
+                    value={editTotal}
+                    onChange={(e) => setEditTotal(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <button
+                    className="btn-primary text-sm"
+                    onClick={() => handleOverride(h)}
+                    disabled={saving}
+                  >
+                    {saving ? "Saving..." : "Save Override"}
+                  </button>
+                </div>
+                <div className="text-xs text-slate-500">
+                  <p>Auto-calculated: ${Number(h.calculated_total).toFixed(2)}</p>
+                  <p>Adjust units or total when auto-calc doesn&apos;t match special merchant pricing.</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

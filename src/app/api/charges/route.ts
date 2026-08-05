@@ -116,7 +116,7 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-// PUT /api/charges — update charge status (pending -> charged -> paid, etc.)
+// PUT /api/charges — update charge status or override amounts
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
@@ -130,10 +130,52 @@ export async function PUT(request: NextRequest) {
       amount_received,
       date_received,
       notes,
+      // Override fields
+      override_total,
+      override_units,
     } = body;
 
-    if (!id || !status) {
-      return NextResponse.json({ error: "id and status are required" }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+
+    // Handle manual override of calculated_total and/or active_units
+    if (override_total !== undefined || override_units !== undefined) {
+      const existing = await query(`SELECT client_id, billing_month, calculated_total FROM charges WHERE id = $1`, [id]);
+      if (existing.rows.length === 0) {
+        return NextResponse.json({ error: "Charge not found" }, { status: 404 });
+      }
+      const { client_id, billing_month } = existing.rows[0];
+
+      if (override_total !== undefined) {
+        // Update charge calculated_total
+        await query(
+          `UPDATE charges SET calculated_total = $2, notes = COALESCE($3, notes), updated_at = NOW() WHERE id = $1`,
+          [id, override_total, notes || "Manual override"]
+        );
+        // Update usage_record calculated_total
+        await query(
+          `UPDATE usage_records SET calculated_total = $2, source = 'imported_overridden', updated_at = NOW()
+           WHERE client_id = $3 AND billing_month = $4`,
+          [override_total, override_total, client_id, billing_month]
+        );
+      }
+
+      if (override_units !== undefined) {
+        await query(
+          `UPDATE usage_records SET active_units = $1, source = 'imported_overridden', updated_at = NOW()
+           WHERE client_id = $2 AND billing_month = $3`,
+          [override_units, client_id, billing_month]
+        );
+      }
+
+      const updated = await query(`SELECT * FROM charges WHERE id = $1`, [id]);
+      return NextResponse.json(updated.rows[0]);
+    }
+
+    // Standard status update
+    if (!status) {
+      return NextResponse.json({ error: "status is required for non-override updates" }, { status: 400 });
     }
 
     // If amount_charged differs from calculated_total and no variance_reason, require it
